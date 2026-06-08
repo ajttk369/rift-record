@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="리그 오브 레전드 한국 서버 전적 검색">
+    <title>Rift Record - 롤 전적검색</title>
+    <link rel="preconnect" href="https://ddragon.leagueoflegends.com">
+    <link rel="stylesheet" href="/styles.css?v=6">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Rift Record 홈">
+        <span class="brand-mark">R</span>
+        <span>RIFT RECORD</span>
+      </a>
+      <nav aria-label="주요 메뉴">
+        <a class="active" href="/" data-page="search">전적검색</a>
+        <a href="/champions" data-page="tiers">챔피언 티어</a>
+      </nav>
+      <span class="server-badge">KR</span>
+    </header>
+
+    <main>
+      <section id="search" class="search-band">
+        <div class="search-inner">
+          <p class="eyebrow">LEAGUE OF LEGENDS · KR</p>
+          <h1>플레이 기록을 한눈에.</h1>
+          <form id="search-form" class="search-form" autocomplete="off">
+            <label class="sr-only" for="riot-id">Riot ID</label>
+            <div class="search-box">
+              <span class="search-icon" aria-hidden="true"></span>
+              <input
+                id="riot-id"
+                name="riotId"
+                type="text"
+                placeholder="게임이름 #태그"
+                aria-describedby="search-hint"
+                required
+              >
+              <button type="submit" aria-label="전적 검색">
+                검색
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+            <p id="search-hint">Riot ID 전체를 입력하세요. 예: Hide on bush #KR1</p>
+          </form>
+          <div id="recent-searches" class="recent-searches" hidden>
+            <span>최근 검색</span>
+            <div id="recent-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="champion-tiers" class="champion-tiers" hidden>
+        <div class="tier-page-heading">
+          <div>
+            <span class="section-number">수집된 솔로랭크 매치 기반</span>
+            <h1>챔피언 티어표</h1>
+            <p>이 티어표는 사이트에서 수집한 랭크 솔로 매치 데이터로 계산한 참고용 지표입니다. Riot Games 공식 랭킹이 아니며 표본이 적으면 정확도가 낮을 수 있습니다.</p>
+          </div>
+          <div class="tier-meta">
+            <span id="tier-patch">Patch -</span>
+            <span id="tier-updated">업데이트 기록 없음</span>
+          </div>
+        </div>
+        <div class="lane-tabs" role="tablist" aria-label="라인 선택">
+          <button class="active" type="button" data-lane="TOP">TOP</button>
+          <button type="button" data-lane="JUNGLE">JUNGLE</button>
+          <button type="button" data-lane="MID">MID</button>
+          <button type="button" data-lane="ADC">ADC</button>
+          <button type="button" data-lane="SUPPORT">SUPPORT</button>
+        </div>
+        <div class="tier-toolbar">
+          <div class="tier-filter-group">
+            <span>티어</span>
+            <div class="grade-tabs" role="tablist" aria-label="티어 필터">
+              <button class="active" type="button" data-grade="ALL">전체</button>
+              <button type="button" data-grade="S">S</button>
+              <button type="button" data-grade="A">A</button>
+              <button type="button" data-grade="B">B</button>
+              <button type="button" data-grade="C">C</button>
+              <button type="button" data-grade="D">D</button>
+            </div>
+          </div>
+          <div class="tier-actions">
+            <label class="sort-control">
+              <span>정렬</span>
+              <select id="tier-sort">
+                <option value="tierScore">티어 점수</option>
+                <option value="winRate">승률</option>
+                <option value="pickRate">픽률</option>
+                <option value="totalGames">게임 수</option>
+                <option value="averageKDA">KDA</option>
+              </select>
+            </label>
+            <button id="seed-button" class="seed-button" type="button">데이터 수집</button>
+          </div>
+        </div>
+        <p id="seed-status" class="seed-status" hidden></p>
+        <div id="tier-sample-summary" class="tier-sample-summary"></div>
+        <div id="champion-tier-board" class="champion-tier-board"></div>
+      </section>
+
+      <section id="welcome" class="welcome">
+        <div class="welcome-copy">
+          <span class="section-number">01</span>
+          <h2>소환사의 흐름을<br>읽어보세요.</h2>
+          <p>랭크, KDA, 챔피언 기록과 최근 게임을 Riot 공식 데이터로 확인합니다.</p>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <strong>15</strong>
+            <span>최근 경기 분석</span>
+          </article>
+          <article>
+            <strong>LIVE</strong>
+            <span>Riot API 데이터</span>
+          </article>
+          <article>
+            <strong>KR</strong>
+            <span>한국 서버 전용</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="loading" class="state-panel" hidden>
+        <div class="spinner"></div>
+        <h2>전적을 불러오는 중입니다</h2>
+        <p>최근 15경기를 분석하고 있습니다.</p>
+      </section>
+
+      <section id="error-panel" class="state-panel error-panel" hidden>
+        <span class="error-symbol">!</span>
+        <h2>검색 결과를 불러오지 못했습니다</h2>
+        <p id="error-message"></p>
+      </section>
+
+      <section id="results" class="results" hidden>
+        <div class="profile-band">
+          <div class="profile-inner">
+            <div class="profile-icon-wrap">
+              <img id="profile-icon" alt="">
+              <span id="summoner-level"></span>
+            </div>
+            <div class="identity">
+              <p>KR · SOLO QUEUE</p>
+              <h2><span id="game-name"></span><small id="tag-line"></small></h2>
+              <span id="updated-at"></span>
+            </div>
+            <button id="refresh-button" class="refresh-button" type="button" title="전적 새로고침" aria-label="전적 새로고침">↻</button>
+          </div>
+        </div>
+
+        <div class="dashboard">
+          <aside id="rank" class="sidebar">
+            <section class="panel rank-panel">
+              <div class="panel-heading">
+                <span>솔로 랭크</span>
+                <small>RANKED SOLO</small>
+              </div>
+              <div id="rank-content"></div>
+            </section>
+
+            <section class="panel summary-panel">
+              <div class="panel-heading">
+                <span>최근 요약</span>
+                <small>LAST 15 GAMES</small>
+              </div>
+              <div id="summary-content"></div>
+            </section>
+
+            <section class="panel mastery-panel">
+              <div class="panel-heading">
+                <span>챔피언 숙련도</span>
+                <small>TOP 5</small>
+              </div>
+              <div id="mastery-content"></div>
+            </section>
+          </aside>
+
+          <section id="matches" class="match-section">
+            <div class="match-toolbar">
+              <div>
+                <span class="section-number">02</span>
+                <h2>최근 게임</h2>
+              </div>
+              <div class="filter-tabs" role="tablist" aria-label="게임 필터">
+                <button class="active" type="button" data-filter="all">전체</button>
+                <button type="button" data-filter="ranked">랭크</button>
+                <button type="button" data-filter="normal">일반</button>
+              </div>
+            </div>
+            <div id="match-list" class="match-list"></div>
+            <p id="empty-matches" class="empty-matches" hidden>해당 조건의 게임이 없습니다.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Rift Record is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p>
+    </footer>
+
+    <script type="module" src="/app.js?v=6"></script>
+  </body>
+</html>
