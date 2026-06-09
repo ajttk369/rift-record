@@ -9,6 +9,7 @@ import {
   upsertChampionStatsCache
 } from "./match-store.mjs";
 import { getSupabaseStatus, hasSupabaseConfig } from "./supabase-server.mjs";
+
 const API_KEY = process.env.RIOT_API_KEY;
 const PLATFORM = "kr";
 const REGION = "asia";
@@ -27,6 +28,10 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
         ...getSupabaseStatus(),
         timestamp: new Date().toISOString()
       });
+    }
+
+    if (pathname === "/api/db-health") {
+      return await handleDbHealth();
     }
 
     if (pathname === "/api/static") {
@@ -71,32 +76,40 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
       if (!API_KEY) return fail(503, "RIOT_API_KEY가 설정되지 않았습니다.");
       const gameName = searchParams.get("gameName")?.trim();
       const tagLine = searchParams.get("tagLine")?.trim();
+
       if (!gameName || !tagLine) {
         return fail(400, "Riot ID를 게임이름#태그 형식으로 입력해 주세요.");
       }
+
       return ok(await getSummonerProfile(gameName, tagLine));
     }
 
     return fail(404, "API 경로를 찾을 수 없습니다.");
   } catch (error) {
     const status = error.status || 500;
+    const safeDebug = createSafeDebug(error);
+
     const message = error.code === "SUPABASE_CONFIG_MISSING"
       ? "Supabase 환경변수가 설정되지 않아 배포 환경에서 데이터를 수집해 저장할 수 없습니다. Vercel Environment Variables에 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY를 추가해 주세요."
       : error.code === "SUPABASE_ERROR"
         ? "매치 데이터 저장 중 문제가 발생했습니다."
         : status === 404
-      ? "플레이어를 찾을 수 없습니다. Riot ID와 태그를 확인해 주세요."
-      : status === 403
-        ? "API 키가 만료되었거나 유효하지 않습니다. 새 개발 키로 교체해 주세요."
-        : status === 429
-          ? "Riot API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
-          : error.message || "서버에서 요청을 처리하지 못했습니다.";
+          ? "플레이어를 찾을 수 없습니다. Riot ID와 태그를 확인해 주세요."
+          : status === 403
+            ? "API 키가 만료되었거나 유효하지 않습니다. 새 개발 키로 교체해 주세요."
+            : status === 429
+              ? "Riot API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+              : error.message || "서버에서 요청을 처리하지 못했습니다.";
+
+    console.error("[handleApiRequest] failed", safeDebug);
+
     return {
       status,
       body: {
         error: message,
         endpoint: error.endpoint,
-        riotMessage: error.riotMessage
+        riotMessage: error.riotMessage,
+        debug: safeDebug
       }
     };
   }
@@ -110,9 +123,51 @@ function fail(status, error) {
   return { status, body: { error } };
 }
 
+async function handleDbHealth() {
+  try {
+    const supabaseStatus = getSupabaseStatus();
+
+    if (!hasSupabaseConfig()) {
+      return {
+        status: 503,
+        body: {
+          ok: false,
+          ...supabaseStatus,
+          error: "Supabase 환경변수가 설정되지 않았습니다."
+        }
+      };
+    }
+
+    const storedMatchCount = await getStoredMatchCount();
+    const participants = await getParticipantsForStats();
+
+    return ok({
+      ok: true,
+      ...supabaseStatus,
+      checks: {
+        storedMatchCount,
+        participantsReadable: Array.isArray(participants),
+        participantSampleCount: Array.isArray(participants) ? participants.length : 0
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return {
+      status: error.status || 500,
+      body: {
+        ok: false,
+        ...getSupabaseStatus(),
+        error: "Supabase DB 상태 확인 중 문제가 발생했습니다.",
+        debug: createSafeDebug(error)
+      }
+    };
+  }
+}
+
 async function getSummonerProfile(gameName, tagLine) {
   const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
   const cached = responseCache.get(cacheKey);
+
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
@@ -121,17 +176,20 @@ async function getSummonerProfile(gameName, tagLine) {
     REGION,
     `/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`
   );
+
   const [summoner, matchIds, version] = await Promise.all([
     riotFetch(PLATFORM, `/lol/summoner/v4/summoners/by-puuid/${account.puuid}`),
     riotFetch(REGION, `/lol/match/v5/matches/by-puuid/${account.puuid}/ids?queue=420&start=0&count=15`),
     getDdragonVersion()
   ]);
+
   const [ranked, masteries, matches, staticData] = await Promise.all([
     riotFetch(PLATFORM, `/lol/league/v4/entries/by-puuid/${account.puuid}`),
     riotFetch(PLATFORM, `/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}/top?count=5`),
     getStoredOrFetchMatches(matchIds),
     getStaticData(version)
   ]);
+
   const persistence = await saveMatches(matches);
 
   const compactMatches = matches.map(compactMatch);
@@ -153,6 +211,7 @@ async function getSummonerProfile(gameName, tagLine) {
     updatedAt: new Date().toISOString(),
     persistenceWarning: persistence.warning || getPersistenceWarning()
   };
+
   responseCache.set(cacheKey, { value: payload, expiresAt: Date.now() + 2 * 60 * 1000 });
   return payload;
 }
@@ -201,6 +260,7 @@ function compactStaticData(staticData, matches, masteries) {
   const championIds = new Set(masteries.map((mastery) => String(mastery.championId)));
   const runeIds = new Set();
   const styleIds = new Set();
+
   for (const match of matches) {
     for (const participant of match.info.participants) {
       for (const style of participant.perks?.styles || []) {
@@ -211,15 +271,22 @@ function compactStaticData(staticData, matches, masteries) {
       }
     }
   }
+
   return {
     champions: Object.fromEntries(
-      [...championIds].filter((id) => staticData.champions[id]).map((id) => [id, staticData.champions[id]])
+      [...championIds]
+        .filter((id) => staticData.champions[id])
+        .map((id) => [id, staticData.champions[id]])
     ),
     runes: Object.fromEntries(
-      [...runeIds].filter((id) => staticData.runes[id]).map((id) => [id, staticData.runes[id]])
+      [...runeIds]
+        .filter((id) => staticData.runes[id])
+        .map((id) => [id, staticData.runes[id]])
     ),
     runeStyles: Object.fromEntries(
-      [...styleIds].filter((id) => staticData.runeStyles[id]).map((id) => [id, staticData.runeStyles[id]])
+      [...styleIds]
+        .filter((id) => staticData.runeStyles[id])
+        .map((id) => [id, staticData.runeStyles[id]])
     )
   };
 }
@@ -239,27 +306,42 @@ async function seedChampionStats({ players, matches, tier }) {
   const seedEntries = entries
     .sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0))
     .slice(0, players);
+
   const playerResults = [];
 
   for (const entry of seedEntries) {
     try {
       const puuid = await getEntryPuuid(entry);
+
       if (!puuid) {
         playerResults.push({ leaguePoints: entry.leaguePoints || 0, status: "skipped" });
         continue;
       }
+
       const matchIds = await riotFetch(
         REGION,
         `/lol/match/v5/matches/by-puuid/${puuid}/ids?queue=420&start=0&count=${matches}`
       );
+
       await saveMatches(await getStoredOrFetchMatches(matchIds));
-      playerResults.push({ puuid, leaguePoints: entry.leaguePoints || 0, status: "ok", matchIds: matchIds.length });
+
+      playerResults.push({
+        puuid,
+        leaguePoints: entry.leaguePoints || 0,
+        status: "ok",
+        matchIds: matchIds.length
+      });
     } catch (error) {
-      playerResults.push({ leaguePoints: entry.leaguePoints || 0, status: "failed", error: error.riotMessage || error.message });
+      playerResults.push({
+        leaguePoints: entry.leaguePoints || 0,
+        status: "failed",
+        error: error.riotMessage || error.message
+      });
     }
   }
 
   const afterCount = await getStoredMatchCount();
+
   return {
     ok: true,
     tier,
@@ -280,6 +362,7 @@ async function getLeagueSeedEntries(tier) {
     grandmaster: "/lol/league/v4/grandmasterleagues/by-queue/RANKED_SOLO_5x5",
     master: "/lol/league/v4/masterleagues/by-queue/RANKED_SOLO_5x5"
   };
+
   const payload = await riotFetch(PLATFORM, endpoints[tier] || endpoints.challenger);
   return payload.entries || [];
 }
@@ -287,7 +370,12 @@ async function getLeagueSeedEntries(tier) {
 async function getEntryPuuid(entry) {
   if (entry.puuid) return entry.puuid;
   if (!entry.summonerId) return null;
-  const summoner = await riotFetch(PLATFORM, `/lol/summoner/v4/summoners/${encodeURIComponent(entry.summonerId)}`);
+
+  const summoner = await riotFetch(
+    PLATFORM,
+    `/lol/summoner/v4/summoners/${encodeURIComponent(entry.summonerId)}`
+  );
+
   return summoner.puuid;
 }
 
@@ -295,10 +383,13 @@ async function getChampionStats(position, { force = false } = {}) {
   const version = await getDdragonVersion();
   const cachedRows = force ? [] : await getChampionStatsFromCache(position, version);
   const lastMatchUpdatedAt = await getLastUpdatedAt();
+
   const cacheIsCurrent = cachedRows.length
     && (!lastMatchUpdatedAt || new Date(cachedRows[0].calculated_at).getTime() >= new Date(lastMatchUpdatedAt).getTime());
+
   if (cacheIsCurrent) {
     const staticData = await getStaticDataForStats(version);
+
     return buildChampionStatsResponse({
       position,
       version,
@@ -310,6 +401,7 @@ async function getChampionStats(position, { force = false } = {}) {
   }
 
   const participants = await getParticipantsForStats();
+
   if (!participants.length) {
     return buildChampionStatsResponse({
       position,
@@ -330,12 +422,16 @@ async function getChampionStats(position, { force = false } = {}) {
       field(participant, "teamPosition", "team_position")
       || field(participant, "individualPosition", "individual_position")
     );
+
     if (participantPosition !== position) continue;
+
     positionGames += 1;
+
     const championId = Number(field(participant, "championId", "champion_id"));
     const key = String(championId);
     const participantChampionName = field(participant, "championName", "champion_name");
     const champion = staticData.champions[key] || { id: participantChampionName, name: participantChampionName };
+
     const current = aggregates.get(key) || {
       championId,
       championName: champion.name,
@@ -349,9 +445,11 @@ async function getChampionStats(position, { force = false } = {}) {
       cs: 0,
       kdaTotal: 0
     };
+
     const kills = Number(field(participant, "kills", "kills") || 0);
     const deaths = Number(field(participant, "deaths", "deaths") || 0);
     const assists = Number(field(participant, "assists", "assists") || 0);
+
     current.totalGames += 1;
     current.wins += participant.win ? 1 : 0;
     current.kills += kills;
@@ -360,6 +458,7 @@ async function getChampionStats(position, { force = false } = {}) {
     current.cs += Number(field(participant, "totalMinionsKilled", "total_minions_killed") || 0)
       + Number(field(participant, "neutralMinionsKilled", "neutral_minions_killed") || 0);
     current.kdaTotal += (kills + assists) / Math.max(deaths, 1);
+
     aggregates.set(key, current);
   }
 
@@ -382,26 +481,49 @@ async function getChampionStats(position, { force = false } = {}) {
   }));
 
   const maxPickRate = Math.max(...rows.map((row) => row.pickRate), 1);
+
   for (const row of rows) {
     const normalizedWinRate = clamp(((row.winRate - 45) / 10) * 100, 0, 100);
     const normalizedPickRate = clamp((row.pickRate / maxPickRate) * 100, 0, 100);
     const normalizedKDA = clamp((row.averageKDA / 5) * 100, 0, 100);
     const sampleConfidence = clamp((row.totalGames / 100) * 100, 0, 100);
+
     row.tierScore = round(
-      normalizedWinRate * 0.55 + normalizedPickRate * 0.25 + normalizedKDA * 0.10 + sampleConfidence * 0.10,
+      normalizedWinRate * 0.55
+        + normalizedPickRate * 0.25
+        + normalizedKDA * 0.10
+        + sampleConfidence * 0.10,
       1
     );
+
     row.tierGrade = "N/A";
   }
 
-  const eligible = rows.filter((row) => !row.lowSample).sort((a, b) => b.tierScore - a.tierScore);
+  const eligible = rows
+    .filter((row) => !row.lowSample)
+    .sort((a, b) => b.tierScore - a.tierScore);
+
   eligible.forEach((row, index) => {
     const percentile = (index + 1) / eligible.length;
-    row.tierGrade = percentile <= 0.10 ? "S" : percentile <= 0.30 ? "A" : percentile <= 0.60 ? "B" : percentile <= 0.85 ? "C" : "D";
+    row.tierGrade = percentile <= 0.10
+      ? "S"
+      : percentile <= 0.30
+        ? "A"
+        : percentile <= 0.60
+          ? "B"
+          : percentile <= 0.85
+            ? "C"
+            : "D";
   });
-  rows.sort((a, b) => (a.lowSample !== b.lowSample ? (a.lowSample ? 1 : -1) : b.tierScore - a.tierScore));
+
+  rows.sort((a, b) => (
+    a.lowSample !== b.lowSample
+      ? (a.lowSample ? 1 : -1)
+      : b.tierScore - a.tierScore
+  ));
 
   const calculatedAt = new Date().toISOString();
+
   await upsertChampionStatsCache(rows.map((row) => ({
     position,
     champion_id: row.championId,
@@ -447,6 +569,7 @@ function cacheRowToApiRow(row, staticData) {
     id: row.champion_name,
     name: row.champion_name
   };
+
   return {
     championId: row.champion_id,
     championName: row.champion_name,
@@ -482,26 +605,33 @@ async function getStaticDataForStats(version) {
 
 async function riotFetch(route, path, attempt = 0) {
   const response = await scheduleRiotRequest(() =>
-    fetch(`https://${route}.api.riotgames.com${path}`, { headers: { "X-Riot-Token": API_KEY } })
+    fetch(`https://${route}.api.riotgames.com${path}`, {
+      headers: { "X-Riot-Token": API_KEY }
+    })
   );
+
   if (response.status === 429 && attempt < 3) {
     const retryAfter = Number(response.headers.get("retry-after") || 1);
     await delay(Math.max(1000, retryAfter * 1000));
     return riotFetch(route, path, attempt + 1);
   }
+
   if (!response.ok) {
     let riotMessage;
+
     try {
       riotMessage = (await response.json())?.status?.message;
     } catch {
       riotMessage = undefined;
     }
+
     const error = new Error(`Riot API request failed (${response.status})`);
     error.status = response.status;
     error.endpoint = `${route}:${path.split("?")[0]}`;
     error.riotMessage = riotMessage;
     throw error;
   }
+
   return response.json();
 }
 
@@ -511,6 +641,7 @@ function scheduleRiotRequest(task) {
     await delay(75);
     return result;
   });
+
   riotRequestQueue = run.catch(() => {});
   return run;
 }
@@ -521,55 +652,94 @@ function delay(milliseconds) {
 
 async function getDdragonVersion() {
   if (Date.now() < ddragonCache.expiresAt) return ddragonCache.version;
+
   try {
     const response = await fetch("https://ddragon.leagueoflegends.com/api/versions.json");
+
     if (response.ok) {
       const versions = await response.json();
-      ddragonCache = { version: versions[0], expiresAt: Date.now() + 6 * 60 * 60 * 1000 };
+      ddragonCache = {
+        version: versions[0],
+        expiresAt: Date.now() + 6 * 60 * 60 * 1000
+      };
     }
   } catch {
     // Keep the last known version when Data Dragon is temporarily unavailable.
   }
+
   return ddragonCache.version;
 }
 
 async function getStaticData(version) {
-  if (staticDataCache.value && Date.now() < staticDataCache.expiresAt) return staticDataCache.value;
+  if (staticDataCache.value && Date.now() < staticDataCache.expiresAt) {
+    return staticDataCache.value;
+  }
+
   const base = `https://ddragon.leagueoflegends.com/cdn/${version}/data/ko_KR`;
+
   const [championResponse, runeResponse] = await Promise.all([
     fetch(`${base}/champion.json`),
     fetch(`${base}/runesReforged.json`)
   ]);
-  if (!championResponse.ok || !runeResponse.ok) throw new Error("Data Dragon static data request failed");
-  const [championPayload, runePayload] = await Promise.all([championResponse.json(), runeResponse.json()]);
+
+  if (!championResponse.ok || !runeResponse.ok) {
+    throw new Error("Data Dragon static data request failed");
+  }
+
+  const [championPayload, runePayload] = await Promise.all([
+    championResponse.json(),
+    runeResponse.json()
+  ]);
+
   const champions = {};
   for (const champion of Object.values(championPayload.data)) {
-    champions[champion.key] = { id: champion.id, name: champion.name };
+    champions[champion.key] = {
+      id: champion.id,
+      name: champion.name
+    };
   }
+
   const runes = {};
   const runeStyles = {};
   for (const style of runePayload) {
-    runeStyles[style.id] = { name: style.name, icon: style.icon };
+    runeStyles[style.id] = {
+      name: style.name,
+      icon: style.icon
+    };
+
     for (const slot of style.slots) {
       for (const rune of slot.runes) {
-        runes[rune.id] = { name: rune.name, icon: rune.icon };
+        runes[rune.id] = {
+          name: rune.name,
+          icon: rune.icon
+        };
       }
     }
   }
-  staticDataCache = { value: { champions, runes, runeStyles }, expiresAt: Date.now() + 6 * 60 * 60 * 1000 };
+
+  staticDataCache = {
+    value: { champions, runes, runeStyles },
+    expiresAt: Date.now() + 6 * 60 * 60 * 1000
+  };
+
   return staticDataCache.value;
 }
 
 async function mapLimit(items, limit, mapper) {
   const results = new Array(items.length);
   let cursor = 0;
+
   async function worker() {
     while (cursor < items.length) {
       const index = cursor++;
       results[index] = await mapper(items[index], index);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  );
+
   return results;
 }
 
@@ -585,6 +755,7 @@ function normalizePosition(position) {
     UTILITY: "SUPPORT",
     SUPPORT: "SUPPORT"
   };
+
   return positions[String(position || "").toUpperCase()] || null;
 }
 
@@ -595,4 +766,84 @@ function clamp(value, minimum, maximum) {
 function round(value, precision) {
   const factor = 10 ** precision;
   return Math.round(value * factor) / factor;
+}
+
+function createSafeDebug(error) {
+  const debug = {
+    name: error?.name,
+    code: error?.code,
+    status: error?.status,
+    message: error?.message,
+    endpoint: error?.endpoint,
+    riotMessage: error?.riotMessage,
+    details: error?.details,
+    hint: error?.hint
+  };
+
+  if (error?.supabase) {
+    debug.supabase = sanitizeObject(error.supabase);
+  }
+
+  if (error?.cause) {
+    debug.cause = sanitizeObject(error.cause);
+  }
+
+  for (const key of Object.keys(error || {})) {
+    if (["name", "code", "status", "message", "endpoint", "riotMessage", "details", "hint", "supabase", "cause"].includes(key)) {
+      continue;
+    }
+
+    debug[key] = sanitizeObject(error[key]);
+  }
+
+  return removeEmpty(debug);
+}
+
+function sanitizeObject(value) {
+  if (value == null) return value;
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(sanitizeObject);
+  }
+
+  const blockedKeys = new Set([
+    "apikey",
+    "apiKey",
+    "token",
+    "access_token",
+    "refresh_token",
+    "authorization",
+    "Authorization",
+    "x-riot-token",
+    "X-Riot-Token",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "RIOT_API_KEY"
+  ]);
+
+  const result = {};
+
+  for (const [key, item] of Object.entries(value)) {
+    if (blockedKeys.has(key)) {
+      result[key] = "[redacted]";
+      continue;
+    }
+
+    result[key] = sanitizeObject(item);
+  }
+
+  return removeEmpty(result);
+}
+
+function removeEmpty(object) {
+  if (!object || typeof object !== "object" || Array.isArray(object)) {
+    return object;
+  }
+
+  return Object.fromEntries(
+    Object.entries(object).filter(([, value]) => value !== undefined)
+  );
 }
