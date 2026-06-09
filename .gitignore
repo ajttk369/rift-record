@@ -1,7 +1,7 @@
 .env
 .env.local
 node_modules/
-data/matches.json
+data/*.json
 server.log
 server-error.log
 .vercel/

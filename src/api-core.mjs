@@ -1,12 +1,14 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-
-const root = fileURLToPath(new URL("..", import.meta.url));
-const storePath = process.env.VERCEL
-  ? join(tmpdir(), "rift-record-matches.json")
-  : join(root, "data", "matches.json");
+import {
+  getChampionStatsFromCache,
+  getLastUpdatedAt,
+  getMatchesByIds,
+  getParticipantsForStats,
+  getPersistenceWarning,
+  getStoredMatchCount,
+  saveMatches,
+  upsertChampionStatsCache
+} from "./match-store.mjs";
+import { getSupabaseStatus, hasSupabaseConfig } from "./supabase-server.mjs";
 const API_KEY = process.env.RIOT_API_KEY;
 const PLATFORM = "kr";
 const REGION = "asia";
@@ -14,14 +16,17 @@ const REGION = "asia";
 let ddragonCache = { version: "16.9.1", expiresAt: 0 };
 let staticDataCache = { value: null, expiresAt: 0 };
 let riotRequestQueue = Promise.resolve();
-let storeWriteQueue = Promise.resolve();
-let storeCache = null;
 const responseCache = new Map();
 
 export async function handleApiRequest({ method, pathname, searchParams }) {
   try {
     if (pathname === "/api/health") {
-      return ok({ ok: true, apiKeyConfigured: Boolean(API_KEY), vercel: Boolean(process.env.VERCEL) });
+      return ok({
+        status: "ok",
+        hasRiotApiKey: Boolean(API_KEY),
+        ...getSupabaseStatus(),
+        timestamp: new Date().toISOString()
+      });
     }
 
     if (pathname === "/api/static") {
@@ -37,7 +42,10 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
 
     if (pathname === "/api/recalculate-champion-stats" && method === "POST") {
       const positions = ["TOP", "JUNGLE", "MID", "ADC", "SUPPORT"];
-      const results = await Promise.all(positions.map((position) => getChampionStats(position)));
+      const results = [];
+      for (const position of positions) {
+        results.push(await getChampionStats(position, { force: true }));
+      }
       return ok({
         ok: true,
         recalculatedAt: new Date().toISOString(),
@@ -49,6 +57,9 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
     }
 
     if (pathname === "/api/seed-champion-stats" && method === "POST") {
+      if (process.env.VERCEL && !hasSupabaseConfig()) {
+        return fail(503, getPersistenceWarning());
+      }
       if (!API_KEY) return fail(503, "RIOT_API_KEY가 설정되지 않았습니다.");
       const players = clamp(Number(searchParams.get("players") || 5), 1, 10);
       const matches = clamp(Number(searchParams.get("matches") || 10), 1, 15);
@@ -69,7 +80,11 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
     return fail(404, "API 경로를 찾을 수 없습니다.");
   } catch (error) {
     const status = error.status || 500;
-    const message = status === 404
+    const message = error.code === "SUPABASE_CONFIG_MISSING"
+      ? "Supabase 환경변수가 설정되지 않아 배포 환경에서 데이터를 수집해 저장할 수 없습니다. Vercel Environment Variables에 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY를 추가해 주세요."
+      : error.code === "SUPABASE_ERROR"
+        ? "매치 데이터 저장 중 문제가 발생했습니다."
+        : status === 404
       ? "플레이어를 찾을 수 없습니다. Riot ID와 태그를 확인해 주세요."
       : status === 403
         ? "API 키가 만료되었거나 유효하지 않습니다. 새 개발 키로 교체해 주세요."
@@ -99,7 +114,6 @@ async function getSummonerProfile(gameName, tagLine) {
   const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
   const cached = responseCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    await saveMatches(cached.value.matches);
     return cached.value;
   }
 
@@ -118,8 +132,9 @@ async function getSummonerProfile(gameName, tagLine) {
     getStoredOrFetchMatches(matchIds),
     getStaticData(version)
   ]);
-  await saveMatches(matches);
+  const persistence = await saveMatches(matches);
 
+  const compactMatches = matches.map(compactMatch);
   const payload = {
     account: {
       gameName: account.gameName || gameName,
@@ -132,18 +147,85 @@ async function getSummonerProfile(gameName, tagLine) {
     },
     ranked,
     masteries,
-    matches,
-    staticData,
+    matches: compactMatches,
+    staticData: compactStaticData(staticData, compactMatches, masteries),
     ddragonVersion: version,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    persistenceWarning: persistence.warning || getPersistenceWarning()
   };
   responseCache.set(cacheKey, { value: payload, expiresAt: Date.now() + 2 * 60 * 1000 });
   return payload;
 }
 
+function compactMatch(match) {
+  return {
+    metadata: { matchId: match.metadata.matchId },
+    info: {
+      queueId: match.info.queueId,
+      gameCreation: match.info.gameCreation,
+      gameStartTimestamp: match.info.gameStartTimestamp,
+      gameDuration: match.info.gameDuration,
+      participants: match.info.participants.map((participant) => ({
+        puuid: participant.puuid,
+        teamId: participant.teamId,
+        win: participant.win,
+        championId: participant.championId,
+        championName: participant.championName,
+        champLevel: participant.champLevel,
+        riotIdGameName: participant.riotIdGameName,
+        summonerName: participant.summonerName,
+        teamPosition: participant.teamPosition,
+        individualPosition: participant.individualPosition,
+        kills: participant.kills,
+        deaths: participant.deaths,
+        assists: participant.assists,
+        totalMinionsKilled: participant.totalMinionsKilled,
+        neutralMinionsKilled: participant.neutralMinionsKilled,
+        totalDamageDealtToChampions: participant.totalDamageDealtToChampions,
+        visionScore: participant.visionScore,
+        goldEarned: participant.goldEarned,
+        item0: participant.item0,
+        item1: participant.item1,
+        item2: participant.item2,
+        item3: participant.item3,
+        item4: participant.item4,
+        item5: participant.item5,
+        item6: participant.item6,
+        perks: participant.perks
+      }))
+    }
+  };
+}
+
+function compactStaticData(staticData, matches, masteries) {
+  const championIds = new Set(masteries.map((mastery) => String(mastery.championId)));
+  const runeIds = new Set();
+  const styleIds = new Set();
+  for (const match of matches) {
+    for (const participant of match.info.participants) {
+      for (const style of participant.perks?.styles || []) {
+        styleIds.add(String(style.style));
+        for (const selection of style.selections || []) {
+          runeIds.add(String(selection.perk));
+        }
+      }
+    }
+  }
+  return {
+    champions: Object.fromEntries(
+      [...championIds].filter((id) => staticData.champions[id]).map((id) => [id, staticData.champions[id]])
+    ),
+    runes: Object.fromEntries(
+      [...runeIds].filter((id) => staticData.runes[id]).map((id) => [id, staticData.runes[id]])
+    ),
+    runeStyles: Object.fromEntries(
+      [...styleIds].filter((id) => staticData.runeStyles[id]).map((id) => [id, staticData.runeStyles[id]])
+    )
+  };
+}
+
 async function getStoredOrFetchMatches(matchIds) {
-  const store = await readStore();
-  const storedMatches = new Map(store.matches.map((match) => [match.metadata.matchId, match]));
+  const storedMatches = await getMatchesByIds(matchIds);
   return mapLimit(matchIds, 2, (matchId) =>
     storedMatches.has(matchId)
       ? Promise.resolve(storedMatches.get(matchId))
@@ -152,8 +234,7 @@ async function getStoredOrFetchMatches(matchIds) {
 }
 
 async function seedChampionStats({ players, matches, tier }) {
-  const storeBefore = await readStore();
-  const beforeCount = storeBefore.matches.length;
+  const beforeCount = await getStoredMatchCount();
   const entries = await getLeagueSeedEntries(tier);
   const seedEntries = entries
     .sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0))
@@ -178,8 +259,7 @@ async function seedChampionStats({ players, matches, tier }) {
     }
   }
 
-  await storeWriteQueue;
-  const storeAfter = await readStore();
+  const afterCount = await getStoredMatchCount();
   return {
     ok: true,
     tier,
@@ -187,9 +267,9 @@ async function seedChampionStats({ players, matches, tier }) {
     playersProcessed: playerResults.length,
     matchesPerPlayer: matches,
     storedMatchesBefore: beforeCount,
-    storedMatchesAfter: storeAfter.matches.length,
-    newMatches: storeAfter.matches.length - beforeCount,
-    updatedAt: storeAfter.updatedAt,
+    storedMatchesAfter: afterCount,
+    newMatches: afterCount - beforeCount,
+    updatedAt: await getLastUpdatedAt(),
     players: playerResults
   };
 }
@@ -211,68 +291,76 @@ async function getEntryPuuid(entry) {
   return summoner.puuid;
 }
 
-async function readStore() {
-  if (storeCache) return storeCache;
-  try {
-    storeCache = JSON.parse(await readFile(storePath, "utf8"));
-  } catch {
-    storeCache = { matches: [], updatedAt: null };
-  }
-  return storeCache;
-}
-
-async function saveMatches(matches) {
-  if (!matches?.length) return;
-  storeWriteQueue = storeWriteQueue.then(async () => {
-    const store = await readStore();
-    const existing = new Set(store.matches.map((match) => match.metadata.matchId));
-    const additions = matches.filter((match) => !existing.has(match.metadata.matchId));
-    if (!additions.length) return;
-    store.matches.push(...additions);
-    store.updatedAt = new Date().toISOString();
-    await mkdir(process.env.VERCEL ? tmpdir() : join(root, "data"), { recursive: true });
-    await writeFile(storePath, JSON.stringify(store), "utf8");
-  });
-  return storeWriteQueue;
-}
-
-async function getChampionStats(position) {
-  const store = await readStore();
+async function getChampionStats(position, { force = false } = {}) {
   const version = await getDdragonVersion();
-  const staticData = await getStaticData(version);
+  const cachedRows = force ? [] : await getChampionStatsFromCache(position, version);
+  const lastMatchUpdatedAt = await getLastUpdatedAt();
+  const cacheIsCurrent = cachedRows.length
+    && (!lastMatchUpdatedAt || new Date(cachedRows[0].calculated_at).getTime() >= new Date(lastMatchUpdatedAt).getTime());
+  if (cacheIsCurrent) {
+    const staticData = await getStaticDataForStats(version);
+    return buildChampionStatsResponse({
+      position,
+      version,
+      rows: cachedRows.map((row) => cacheRowToApiRow(row, staticData)),
+      positionGames: cachedRows.reduce((sum, row) => sum + Number(row.total_games || 0), 0),
+      collectedMatches: await getStoredMatchCount(),
+      updatedAt: cachedRows[0].calculated_at
+    });
+  }
+
+  const participants = await getParticipantsForStats();
+  if (!participants.length) {
+    return buildChampionStatsResponse({
+      position,
+      version,
+      rows: [],
+      positionGames: 0,
+      collectedMatches: await getStoredMatchCount(),
+      updatedAt: lastMatchUpdatedAt
+    });
+  }
+
+  const staticData = await getStaticDataForStats(version);
   const aggregates = new Map();
   let positionGames = 0;
 
-  for (const match of store.matches) {
-    if (match.info.queueId !== 420) continue;
-    for (const participant of match.info.participants) {
-      const participantPosition = normalizePosition(participant.teamPosition || participant.individualPosition);
-      if (participantPosition !== position) continue;
-      positionGames += 1;
-      const key = String(participant.championId);
-      const champion = staticData.champions[key] || { id: participant.championName, name: participant.championName };
-      const current = aggregates.get(key) || {
-        championId: participant.championId,
-        championName: champion.name,
-        championAssetId: champion.id,
-        position,
-        totalGames: 0,
-        wins: 0,
-        kills: 0,
-        deaths: 0,
-        assists: 0,
-        cs: 0,
-        kdaTotal: 0
-      };
-      current.totalGames += 1;
-      current.wins += participant.win ? 1 : 0;
-      current.kills += participant.kills || 0;
-      current.deaths += participant.deaths || 0;
-      current.assists += participant.assists || 0;
-      current.cs += (participant.totalMinionsKilled || 0) + (participant.neutralMinionsKilled || 0);
-      current.kdaTotal += ((participant.kills || 0) + (participant.assists || 0)) / Math.max(participant.deaths || 0, 1);
-      aggregates.set(key, current);
-    }
+  for (const participant of participants) {
+    const participantPosition = normalizePosition(
+      field(participant, "teamPosition", "team_position")
+      || field(participant, "individualPosition", "individual_position")
+    );
+    if (participantPosition !== position) continue;
+    positionGames += 1;
+    const championId = Number(field(participant, "championId", "champion_id"));
+    const key = String(championId);
+    const participantChampionName = field(participant, "championName", "champion_name");
+    const champion = staticData.champions[key] || { id: participantChampionName, name: participantChampionName };
+    const current = aggregates.get(key) || {
+      championId,
+      championName: champion.name,
+      championAssetId: champion.id,
+      position,
+      totalGames: 0,
+      wins: 0,
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      cs: 0,
+      kdaTotal: 0
+    };
+    const kills = Number(field(participant, "kills", "kills") || 0);
+    const deaths = Number(field(participant, "deaths", "deaths") || 0);
+    const assists = Number(field(participant, "assists", "assists") || 0);
+    current.totalGames += 1;
+    current.wins += participant.win ? 1 : 0;
+    current.kills += kills;
+    current.deaths += deaths;
+    current.assists += assists;
+    current.cs += Number(field(participant, "totalMinionsKilled", "total_minions_killed") || 0)
+      + Number(field(participant, "neutralMinionsKilled", "neutral_minions_killed") || 0);
+    current.kdaTotal += (kills + assists) / Math.max(deaths, 1);
+    aggregates.set(key, current);
   }
 
   const rows = [...aggregates.values()].map((row) => ({
@@ -313,15 +401,83 @@ async function getChampionStats(position) {
   });
   rows.sort((a, b) => (a.lowSample !== b.lowSample ? (a.lowSample ? 1 : -1) : b.tierScore - a.tierScore));
 
+  const calculatedAt = new Date().toISOString();
+  await upsertChampionStatsCache(rows.map((row) => ({
+    position,
+    champion_id: row.championId,
+    champion_name: row.championName,
+    total_games: row.totalGames,
+    wins: row.wins,
+    losses: row.losses,
+    win_rate: row.winRate,
+    pick_rate: row.pickRate,
+    avg_kda: row.averageKDA,
+    avg_cs: row.averageCS,
+    tier_score: row.tierScore,
+    tier_grade: row.tierGrade,
+    low_sample: row.lowSample,
+    patch_version: version,
+    calculated_at: calculatedAt
+  })));
+
+  return buildChampionStatsResponse({
+    position,
+    version,
+    rows,
+    positionGames,
+    collectedMatches: await getStoredMatchCount(),
+    updatedAt: calculatedAt
+  });
+}
+
+function buildChampionStatsResponse({ position, version, rows, positionGames, collectedMatches, updatedAt }) {
   return {
     position,
     patchVersion: version,
-    updatedAt: store.updatedAt,
-    collectedMatches: store.matches.length,
+    updatedAt,
+    collectedMatches,
     positionSamples: positionGames,
     minimumSample: 10,
     champions: rows
   };
+}
+
+function cacheRowToApiRow(row, staticData) {
+  const champion = staticData.champions[String(row.champion_id)] || {
+    id: row.champion_name,
+    name: row.champion_name
+  };
+  return {
+    championId: row.champion_id,
+    championName: row.champion_name,
+    championAssetId: champion.id,
+    position: row.position,
+    totalGames: Number(row.total_games),
+    wins: Number(row.wins),
+    losses: Number(row.losses),
+    winRate: Number(row.win_rate),
+    pickRate: Number(row.pick_rate),
+    averageKDA: Number(row.avg_kda),
+    averageKills: 0,
+    averageDeaths: 0,
+    averageAssists: 0,
+    averageCS: Number(row.avg_cs),
+    tierScore: Number(row.tier_score),
+    tierGrade: row.tier_grade,
+    lowSample: Boolean(row.low_sample)
+  };
+}
+
+function field(object, camelName, snakeName) {
+  return object?.[camelName] ?? object?.[snakeName];
+}
+
+async function getStaticDataForStats(version) {
+  try {
+    return await getStaticData(version);
+  } catch {
+    return { champions: {} };
+  }
 }
 
 async function riotFetch(route, path, attempt = 0) {

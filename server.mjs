@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const storePath = join(root, "data", "matches.json");
 await loadEnv(join(root, ".env"));
+const { handleApiRequest } = await import("./src/api-core.mjs");
 
 const PORT = Number(process.env.PORT || 4173);
 const API_KEY = process.env.RIOT_API_KEY;
@@ -33,10 +34,20 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);
 
+    if (url.pathname.startsWith("/api/")) {
+      const result = await handleApiRequest({
+        method: request.method,
+        pathname: url.pathname,
+        searchParams: url.searchParams
+      });
+      return sendJson(response, result.status, result.body);
+    }
+
     if (url.pathname === "/api/health") {
       return sendJson(response, 200, {
-        ok: true,
-        apiKeyConfigured: Boolean(API_KEY)
+        status: "ok",
+        hasRiotApiKey: Boolean(API_KEY),
+        timestamp: new Date().toISOString()
       });
     }
 
@@ -160,6 +171,7 @@ async function getSummonerProfile(gameName, tagLine) {
   ]);
   await saveMatches(matches);
 
+  const compactMatches = matches.map(compactMatch);
   const payload = {
     account: {
       gameName: account.gameName || gameName,
@@ -172,8 +184,8 @@ async function getSummonerProfile(gameName, tagLine) {
     },
     ranked,
     masteries,
-    matches,
-    staticData,
+    matches: compactMatches,
+    staticData: compactStaticData(staticData, compactMatches, masteries),
     ddragonVersion: version,
     updatedAt: new Date().toISOString()
   };
@@ -183,6 +195,73 @@ async function getSummonerProfile(gameName, tagLine) {
     expiresAt: Date.now() + 2 * 60 * 1000
   });
   return payload;
+}
+
+function compactMatch(match) {
+  return {
+    metadata: { matchId: match.metadata.matchId },
+    info: {
+      queueId: match.info.queueId,
+      gameCreation: match.info.gameCreation,
+      gameStartTimestamp: match.info.gameStartTimestamp,
+      gameDuration: match.info.gameDuration,
+      participants: match.info.participants.map((participant) => ({
+        puuid: participant.puuid,
+        teamId: participant.teamId,
+        win: participant.win,
+        championId: participant.championId,
+        championName: participant.championName,
+        champLevel: participant.champLevel,
+        riotIdGameName: participant.riotIdGameName,
+        summonerName: participant.summonerName,
+        teamPosition: participant.teamPosition,
+        individualPosition: participant.individualPosition,
+        kills: participant.kills,
+        deaths: participant.deaths,
+        assists: participant.assists,
+        totalMinionsKilled: participant.totalMinionsKilled,
+        neutralMinionsKilled: participant.neutralMinionsKilled,
+        totalDamageDealtToChampions: participant.totalDamageDealtToChampions,
+        visionScore: participant.visionScore,
+        goldEarned: participant.goldEarned,
+        item0: participant.item0,
+        item1: participant.item1,
+        item2: participant.item2,
+        item3: participant.item3,
+        item4: participant.item4,
+        item5: participant.item5,
+        item6: participant.item6,
+        perks: participant.perks
+      }))
+    }
+  };
+}
+
+function compactStaticData(staticData, matches, masteries) {
+  const championIds = new Set(masteries.map((mastery) => String(mastery.championId)));
+  const runeIds = new Set();
+  const styleIds = new Set();
+  for (const match of matches) {
+    for (const participant of match.info.participants) {
+      for (const style of participant.perks?.styles || []) {
+        styleIds.add(String(style.style));
+        for (const selection of style.selections || []) {
+          runeIds.add(String(selection.perk));
+        }
+      }
+    }
+  }
+  return {
+    champions: Object.fromEntries(
+      [...championIds].filter((id) => staticData.champions[id]).map((id) => [id, staticData.champions[id]])
+    ),
+    runes: Object.fromEntries(
+      [...runeIds].filter((id) => staticData.runes[id]).map((id) => [id, staticData.runes[id]])
+    ),
+    runeStyles: Object.fromEntries(
+      [...styleIds].filter((id) => staticData.runeStyles[id]).map((id) => [id, staticData.runeStyles[id]])
+    )
+  };
 }
 
 async function getStoredOrFetchMatches(matchIds) {
