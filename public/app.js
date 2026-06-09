@@ -189,10 +189,12 @@ async function loadChampionTiers() {
 
 function renderChampionTiers() {
   if (!tierData) return;
+
   document.querySelector("#tier-patch").textContent = `Patch ${tierData.patchVersion}`;
   document.querySelector("#tier-updated").textContent = tierData.updatedAt
     ? `${new Date(tierData.updatedAt).toLocaleString("ko-KR")} 업데이트`
     : "아직 수집된 매치가 없습니다";
+
   document.querySelector("#tier-sample-summary").innerHTML = `
     <strong>${number(tierData.collectedMatches)}</strong>개 매치 수집
     <span>${activeLane} 표본 ${number(tierData.positionSamples)}개 · 최소 산정 표본 ${tierData.minimumSample}게임</span>
@@ -233,7 +235,7 @@ function renderChampionTiers() {
             <tr>
               <td class="rank-cell">${index + 1}</td>
               <td>
-                <span class="grade-badge grade-${row.tierGrade === "N/A" ? "na" : row.tierGrade.toLowerCase()}">${row.tierGrade}</span>
+                <span class="grade-badge grade-${row.tierGrade === "N/A" ? "na" : row.tierGrade.toLowerCase()}">${row.tierGrade === "N/A" ? "—" : row.tierGrade}</span>
               </td>
               <td>
                 <div class="table-champion">
@@ -285,15 +287,19 @@ async function search(rawRiotId) {
     matchesExpanded = false;
     personalTierStats = new Map();
     activeFilter = "all";
+
     document.querySelectorAll(".filter-tabs button").forEach((button) => {
       button.classList.toggle("active", button.dataset.filter === "all");
     });
+
     saveRecentSearch(currentRiotId);
+
     history.replaceState(
       null,
       "",
       `/?riotId=${encodeURIComponent(data.account.gameName)}&tag=${encodeURIComponent(data.account.tagLine)}`
     );
+
     renderProfile(data);
     setView("results");
     results.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -330,18 +336,23 @@ function showError(message) {
 
 function renderProfile(data) {
   const { account, summoner, ranked, ddragonVersion, updatedAt } = data;
+
   demoBadge.hidden = !data.isDemo;
   queueLabel.hidden = Boolean(data.isDemo);
+
   const profileIcon = document.querySelector("#profile-icon");
   profileIcon.src = ddragonUrl(ddragonVersion, `img/profileicon/${summoner.profileIconId}.png`);
   profileIcon.alt = `${account.gameName} 프로필 아이콘`;
+
   document.querySelector("#summoner-level").textContent = summoner.level;
   document.querySelector("#game-name").textContent = account.gameName;
   document.querySelector("#tag-line").textContent = `#${account.tagLine}`;
   document.querySelector("#updated-at").textContent =
     `${formatRelativeTime(new Date(updatedAt).getTime())} 업데이트`;
+
   persistenceWarning.hidden = !data.persistenceWarning;
   persistenceWarning.textContent = data.persistenceWarning || "";
+
   updateFavoriteButton();
 
   renderRank(ranked);
@@ -372,7 +383,7 @@ function getFriendlyError(status, serverMessage) {
   if (status === 429) {
     return "Riot API 요청 제한에 도달했습니다. 잠시 후 다시 시도해주세요.";
   }
-  if (status === 403) {
+  if (status === 401 || status === 403) {
     return "Riot API Key가 만료되었거나 유효하지 않습니다. 서버 환경변수를 확인해주세요.";
   }
   return serverMessage || "전적을 불러오는 중 문제가 발생했습니다.";
@@ -381,6 +392,7 @@ function getFriendlyError(status, serverMessage) {
 function renderPersonalAnalysis(data) {
   const analysis = analyzePlayerMatches(data);
   currentAnalysis = analysis;
+
   renderAnalysisSummary(analysis, data);
   renderPlaystyle(analysis);
   renderMatchHighlights(analysis, data);
@@ -389,16 +401,26 @@ function renderPersonalAnalysis(data) {
   renderPositionPerformance(analysis);
   renderRecentTrends(analysis);
   renderImprovementTips(analysis);
+
   if (!data.isDemo) loadPersonalTierStats(analysis, data);
 }
 
 function analyzePlayerMatches(data) {
   const games = data.matches.map((match, index) => {
-    const player = getCurrentParticipant(match, data.account.puuid);
-    if (!player) return null;
+    const player = getCurrentParticipant(match, data.account);
+
+    if (!player) {
+      console.warn("Current participant not found", {
+        matchId: match?.metadata?.matchId,
+        gameName: data?.account?.gameName
+      });
+      return null;
+    }
+
     const teammates = match.info.participants.filter(
       (participant) => participant.teamId === player.teamId
     );
+
     const teamKills = teammates.reduce((total, participant) => total + (participant.kills || 0), 0);
     const durationMinutes = Math.max(match.info.gameDuration / 60, 1);
     const cs = (player.totalMinionsKilled || 0) + (player.neutralMinionsKilled || 0);
@@ -430,6 +452,7 @@ function analyzePlayerMatches(data) {
   }).filter(Boolean);
 
   const count = games.length;
+
   const averages = {
     winRate: count ? (games.filter((game) => game.win).length / count) * 100 : 0,
     kda: avg(games, "kda"),
@@ -465,8 +488,10 @@ function analyzePlayerMatches(data) {
 
 function aggregatePersonalStats(games, key) {
   const groups = new Map();
+
   for (const game of games) {
     const name = game[key] || "UNKNOWN";
+
     const group = groups.get(name) || {
       name,
       games: 0,
@@ -478,6 +503,7 @@ function aggregatePersonalStats(games, key) {
       deaths: 0,
       positions: {}
     };
+
     group.games += 1;
     group.wins += game.win ? 1 : 0;
     group.kda += game.kda;
@@ -486,6 +512,7 @@ function aggregatePersonalStats(games, key) {
     group.visionScore += game.visionScore;
     group.deaths += game.deaths;
     group.positions[game.position] = (group.positions[game.position] || 0) + 1;
+
     groups.set(name, group);
   }
 
@@ -515,6 +542,7 @@ function classifyPlaystyle(averages) {
       ]
     };
   }
+
   if (averages.killParticipation >= 65 && averages.damage >= 22000) {
     return {
       type: "Aggressive Carry Type",
@@ -526,6 +554,7 @@ function classifyPlaystyle(averages) {
       ]
     };
   }
+
   if (averages.csPerMinute >= 7 && averages.deaths <= 4.5) {
     return {
       type: "Stable Farming Type",
@@ -537,6 +566,7 @@ function classifyPlaystyle(averages) {
       ]
     };
   }
+
   if (averages.assists >= averages.kills * 1.4 && averages.killParticipation >= 55) {
     return {
       type: "Teamfight Focused Type",
@@ -548,6 +578,7 @@ function classifyPlaystyle(averages) {
       ]
     };
   }
+
   if (
     averages.kda >= 3 &&
     averages.csPerMinute >= 6 &&
@@ -564,6 +595,7 @@ function classifyPlaystyle(averages) {
       ]
     };
   }
+
   return {
     type: "Objective-Oriented Type",
     description: "무리한 교전보다 안정적인 운영과 경기 흐름을 중시하는 스타일입니다.",
@@ -577,6 +609,7 @@ function classifyPlaystyle(averages) {
 
 function selectHighlight(games, best) {
   if (!games.length) return null;
+
   const scored = games.map((game) => {
     const score =
       (game.win ? 35 : -25) +
@@ -584,8 +617,10 @@ function selectHighlight(games, best) {
       game.killParticipation * 0.25 +
       Math.min(game.damage / 1200, 25) -
       game.deaths * 3;
+
     return { ...game, highlightScore: score };
   });
+
   return scored.sort((a, b) =>
     best ? b.highlightScore - a.highlightScore : a.highlightScore - b.highlightScore
   )[0];
@@ -593,6 +628,7 @@ function selectHighlight(games, best) {
 
 function createImprovementTips(averages) {
   const tips = [];
+
   if (averages.deaths >= 6) {
     tips.push("데스가 많은 편이라 교전 전 시야 확보와 포지션 조절을 조금 더 의식하면 좋아요.");
   }
@@ -614,6 +650,7 @@ function createImprovementTips(averages) {
   if (!tips.length) {
     tips.push("주요 지표가 비교적 균형적입니다. 자주 플레이한 포지션의 강점을 더 발전시켜보세요.");
   }
+
   return tips.slice(0, 3);
 }
 
@@ -627,6 +664,7 @@ function renderAnalysisSummary(analysis, data) {
     ["모스트 챔피언", championDisplayName(data, analysis.mostChampion)],
     ["주 포지션", positionLabel(analysis.mainPosition)]
   ];
+
   document.querySelector("#analysis-summary").innerHTML = cards.map(([label, value]) => `
     <article class="analysis-stat-card">
       <span>${label}</span>
@@ -637,6 +675,7 @@ function renderAnalysisSummary(analysis, data) {
 
 function renderPlaystyle(analysis) {
   const style = analysis.playstyle;
+
   document.querySelector("#playstyle-analysis").innerHTML = `
     <article class="playstyle-card">
       <div>
@@ -658,8 +697,10 @@ function renderMatchHighlights(analysis, data) {
     ["BEST GAME", analysis.bestMatch, "높은 킬 관여율과 안정적인 KDA가 돋보인 경기입니다."],
     ["TOUGH GAME", analysis.worstMatch, "성장 흐름이 다소 끊겼지만 다음 경기에서 보완점을 찾을 수 있는 경기입니다."]
   ];
+
   document.querySelector("#match-highlights").innerHTML = highlights.map(([label, game, text]) => {
     if (!game) return "";
+
     return `
       <article class="highlight-card ${label === "BEST GAME" ? "best" : "tough"}">
         <span>${label}</span>
@@ -679,39 +720,43 @@ function renderMatchHighlights(analysis, data) {
 
 function renderChampionPerformance(analysis, data) {
   if (!analysis || !data) return;
+
   const visibleStats = championPerformanceExpanded
     ? analysis.championStats
     : analysis.championStats.slice(0, 5);
+
   document.querySelector("#champion-performance").innerHTML = visibleStats.map((stat) => {
     const tier = personalTierStats.get(`${stat.name}:${stat.primaryPosition}`);
+
     return `
-    <article class="personal-performance-card">
-      <div class="performance-identity">
-        <img src="${championImage(data.ddragonVersion, stat.name)}" width="46" height="46" alt="${escapeHtml(stat.name)}">
-        <div><strong>${championDisplayName(data, stat.name)}</strong><span>${stat.games}게임 · ${positionLabel(stat.primaryPosition)}</span></div>
-        <small class="personal-tag">${championPerformanceTag(stat)}</small>
-      </div>
-      <div class="personal-metrics">
-        <div><strong>${stat.winRate.toFixed(0)}%</strong><span>승률</span></div>
-        <div><strong>${stat.avgKDA.toFixed(2)}</strong><span>평균 KDA</span></div>
-        <div><strong>${stat.avgCSPerMinute.toFixed(1)}</strong><span>CS/분</span></div>
-        <div><strong>${number(Math.round(stat.avgDamage))}</strong><span>평균 딜량</span></div>
-        <div><strong>${stat.avgVisionScore.toFixed(1)}</strong><span>시야</span></div>
-      </div>
-      <div class="personal-tier-link ${tier ? "" : "unavailable"}">
-        ${tier ? `
-          <span>Rift Record Tier</span>
-          <strong>${tier.tierGrade}</strong>
-          <small>점수 ${tier.tierScore.toFixed(1)} · ${tier.position}</small>
-        ` : `
-          <span>Rift Record Tier</span>
-          <strong>-</strong>
-          <small>Tier data not available</small>
-        `}
-      </div>
-    </article>
-  `;
+      <article class="personal-performance-card">
+        <div class="performance-identity">
+          <img src="${championImage(data.ddragonVersion, stat.name)}" width="46" height="46" alt="${escapeHtml(stat.name)}">
+          <div><strong>${championDisplayName(data, stat.name)}</strong><span>${stat.games}게임 · ${positionLabel(stat.primaryPosition)}</span></div>
+          <small class="personal-tag">${championPerformanceTag(stat)}</small>
+        </div>
+        <div class="personal-metrics">
+          <div><strong>${stat.winRate.toFixed(0)}%</strong><span>승률</span></div>
+          <div><strong>${stat.avgKDA.toFixed(2)}</strong><span>평균 KDA</span></div>
+          <div><strong>${stat.avgCSPerMinute.toFixed(1)}</strong><span>CS/분</span></div>
+          <div><strong>${number(Math.round(stat.avgDamage))}</strong><span>평균 딜량</span></div>
+          <div><strong>${stat.avgVisionScore.toFixed(1)}</strong><span>시야</span></div>
+        </div>
+        <div class="personal-tier-link ${tier ? "" : "unavailable"}">
+          ${tier ? `
+            <span>Rift Record Tier</span>
+            <strong>${tier.tierGrade === "N/A" ? "—" : tier.tierGrade}</strong>
+            <small>점수 ${tier.tierScore.toFixed(1)} · ${tier.position}</small>
+          ` : `
+            <span>Rift Record Tier</span>
+            <strong>—</strong>
+            <small>Tier data not available</small>
+          `}
+        </div>
+      </article>
+    `;
   }).join("");
+
   championPerformanceToggle.hidden = analysis.championStats.length <= 5;
   championPerformanceToggle.textContent = championPerformanceExpanded ? "접기" : "전체 보기";
 }
@@ -722,6 +767,7 @@ async function loadPersonalTierStats(analysis, data) {
       .map((stat) => stat.primaryPosition)
       .filter((position) => position !== "UNKNOWN")
   )];
+
   try {
     const responses = await Promise.all(
       positions.map(async (position) => {
@@ -731,7 +777,9 @@ async function loadPersonalTierStats(analysis, data) {
         return [position, payload.champions || []];
       })
     );
+
     personalTierStats = new Map();
+
     for (const [position, rows] of responses) {
       for (const row of rows) {
         personalTierStats.set(`${row.championAssetId}:${position}`, {
@@ -741,6 +789,7 @@ async function loadPersonalTierStats(analysis, data) {
         });
       }
     }
+
     if (currentData === data) renderChampionPerformance(analysis, data);
   } catch {
     // Tier data is optional; personal performance remains available.
@@ -750,12 +799,14 @@ async function loadPersonalTierStats(analysis, data) {
 function renderRecommendedPicks(analysis, data) {
   const eligible = analysis.championStats.filter((stat) => stat.games >= 2);
   const maxDamage = Math.max(...eligible.map((stat) => stat.avgDamage), 1);
+
   const picks = eligible.map((stat) => {
     const winRateScore = stat.winRate;
     const kdaScore = Math.min((stat.avgKDA / 5) * 100, 100);
     const damageScore = Math.min((stat.avgDamage / maxDamage) * 100, 100);
     const deathControlScore = Math.max(0, 100 - stat.avgDeaths * 12);
     const sampleScore = Math.min((stat.games / 5) * 100, 100);
+
     return {
       ...stat,
       recommendScore:
@@ -799,8 +850,10 @@ function recommendedReason(pick) {
 function renderPositionPerformance(analysis) {
   const statsByPosition = new Map(analysis.positionStats.map((stat) => [stat.name, stat]));
   const positions = ["TOP", "JUNGLE", "MID", "ADC", "SUPPORT"];
+
   document.querySelector("#position-performance").innerHTML = positions.map((position) => {
     const stat = statsByPosition.get(position);
+
     return `
       <article class="position-card ${stat ? "played" : "empty"}">
         <strong>${positionLabel(position)}</strong>
@@ -818,6 +871,7 @@ function renderPositionPerformance(analysis) {
 function renderRecentTrends(analysis) {
   const maxKda = Math.max(...analysis.games.map((game) => game.kda), 1);
   const maxCs = Math.max(...analysis.games.map((game) => game.csPerMinute), 1);
+
   document.querySelector("#recent-trends").innerHTML = `
     <div class="trend-row">
       <span>승패</span>
@@ -952,8 +1006,9 @@ function renderMasteries(data) {
 
 function renderSummary(data) {
   const participants = data.matches
-    .map((match) => getCurrentParticipant(match, data.account.puuid))
+    .map((match) => getCurrentParticipant(match, data.account))
     .filter(Boolean);
+
   const games = participants.length;
   const wins = participants.filter((participant) => participant.win).length;
   const kills = sum(participants, "kills");
@@ -987,6 +1042,7 @@ function renderMatches(data) {
     const type = getQueueType(match.info.queueId);
     return activeFilter === "all" || type.category === activeFilter;
   });
+
   const visibleMatches = matchesExpanded ? filtered : filtered.slice(0, 10);
 
   emptyMatches.hidden = filtered.length > 0;
@@ -1004,23 +1060,27 @@ function renderMatches(data) {
 }
 
 function matchCard(match, data) {
-  const player = getCurrentParticipant(match, data.account.puuid);
+  const player = getCurrentParticipant(match, data.account);
   if (!player) return "";
 
   const queue = getQueueType(match.info.queueId);
   const duration = formatDuration(match.info.gameDuration);
-  const cs = player.totalMinionsKilled + player.neutralMinionsKilled;
+  const cs = (player.totalMinionsKilled || 0) + (player.neutralMinionsKilled || 0);
   const minutes = Math.max(match.info.gameDuration / 60, 1);
   const csPerMinute = (cs / minutes).toFixed(1);
+
   const totalTeamKills = match.info.participants
     .filter((participant) => participant.teamId === player.teamId)
-    .reduce((total, participant) => total + participant.kills, 0);
+    .reduce((total, participant) => total + (participant.kills || 0), 0);
+
   const killParticipation = totalTeamKills
     ? Math.round(((player.kills + player.assists) / totalTeamKills) * 100)
     : 0;
+
   const kda = player.deaths
     ? ((player.kills + player.assists) / player.deaths).toFixed(2)
     : "Perfect";
+
   const result = player.win ? "승리" : "패배";
   const resultClass = player.win ? "win" : "loss";
   const gameCreated = match.info.gameCreation || match.info.gameStartTimestamp;
@@ -1119,11 +1179,13 @@ function renderRunes(player, data) {
       `<span class="rune-icon rune-keystone" role="img" aria-label="${escapeHtml(keystone.name)}" title="${escapeHtml(keystone.name)}" style="background-image:url('https://ddragon.leagueoflegends.com/cdn/img/${keystone.icon}')"></span>`
     );
   }
+
   if (secondaryStyle) {
     images.push(
       `<span class="rune-icon" role="img" aria-label="${escapeHtml(secondaryStyle.name)}" title="${escapeHtml(secondaryStyle.name)}" style="background-image:url('https://ddragon.leagueoflegends.com/cdn/img/${secondaryStyle.icon}')"></span>`
     );
   }
+
   return images.join("");
 }
 
@@ -1139,6 +1201,7 @@ function renderItems(player, version) {
 function renderTeams(match, data) {
   const blue = match.info.participants.filter((participant) => participant.teamId === 100);
   const red = match.info.participants.filter((participant) => participant.teamId === 200);
+
   return `
     <div class="teams">
       ${teamColumn("블루 팀", blue, data)}
@@ -1152,7 +1215,7 @@ function teamColumn(label, participants, data) {
     <div class="team">
       <h3>${label}</h3>
       ${participants.map((participant) => `
-        <div class="participant ${participant.puuid === data.account.puuid ? "current" : ""}">
+        <div class="participant ${isCurrentParticipant(participant, data.account) ? "current" : ""}">
           <img src="${championImage(data.ddragonVersion, participant.championName)}" alt="">
           <span class="participant-name">${escapeHtml(participant.riotIdGameName || participant.summonerName || "Unknown")}</span>
           <span class="participant-kda">${participant.kills}/${participant.deaths}/${participant.assists}</span>
@@ -1162,8 +1225,42 @@ function teamColumn(label, participants, data) {
   `;
 }
 
-function getCurrentParticipant(match, puuid) {
-  return match.info.participants.find((participant) => participant.puuid === puuid);
+function getCurrentParticipant(match, account) {
+  const participants = match?.info?.participants || [];
+  return participants.find((participant) => isCurrentParticipant(participant, account)) || null;
+}
+
+function isCurrentParticipant(participant, account) {
+  if (!participant || !account) return false;
+
+  const accountPuuid = account.puuid;
+  const resolvedPuuid = account.resolvedParticipantPuuid;
+  const gameName = normalizeName(account.gameName);
+  const tagLine = normalizeName(account.tagLine);
+
+  if (accountPuuid && participant.puuid === accountPuuid) return true;
+  if (resolvedPuuid && participant.puuid === resolvedPuuid) return true;
+
+  const participantGameName = normalizeName(participant.riotIdGameName);
+  const participantSummonerName = normalizeName(participant.summonerName);
+  const participantTagLine = normalizeName(participant.riotIdTagline || participant.riotIdTagLine);
+
+  if (gameName && participantGameName === gameName) {
+    return !tagLine || !participantTagLine || participantTagLine === tagLine;
+  }
+
+  if (gameName && participantSummonerName === gameName) {
+    return true;
+  }
+
+  return false;
+}
+
+function normalizeName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function getQueueType(queueId) {
@@ -1199,6 +1296,7 @@ function renderRecentSearches() {
   const searches = getRecentSearches();
   recentSearches.hidden = searches.length === 0;
   clearRecentButton.hidden = searches.length === 0;
+
   recentList.innerHTML = searches.map((riotId) =>
     `<button type="button" data-riot-id="${escapeHtml(riotId)}">${escapeHtml(riotId)}</button>`
   ).join("");
@@ -1218,12 +1316,15 @@ function getFavoriteSearches() {
 
 function toggleCurrentFavorite() {
   if (!currentData || currentData.isDemo || !currentRiotId) return;
+
   const normalized = currentRiotId.toLowerCase();
   const favorites = getFavoriteSearches();
   const exists = favorites.some((item) => item.toLowerCase() === normalized);
+
   const next = exists
     ? favorites.filter((item) => item.toLowerCase() !== normalized)
     : [currentRiotId, ...favorites.filter((item) => item.toLowerCase() !== normalized)].slice(0, 5);
+
   localStorage.setItem("rift-record-favorites", JSON.stringify(next));
   renderFavoriteSearches();
   updateFavoriteButton();
@@ -1231,8 +1332,10 @@ function toggleCurrentFavorite() {
 
 function updateFavoriteButton() {
   const disabled = !currentData || currentData.isDemo || !currentRiotId;
+
   const favorite = !disabled && getFavoriteSearches()
     .some((item) => item.toLowerCase() === currentRiotId.toLowerCase());
+
   favoriteButton.disabled = disabled;
   favoriteButton.textContent = favorite ? "★" : "☆";
   favoriteButton.classList.toggle("active", favorite);
@@ -1244,9 +1347,11 @@ function renderFavoriteSearches() {
   const favorites = getFavoriteSearches();
   favoriteSearches.hidden = favorites.length === 0;
   clearFavoriteButton.hidden = favorites.length === 0;
+
   favoriteList.innerHTML = favorites.map((riotId) =>
     `<button type="button" data-riot-id="${escapeHtml(riotId)}">${escapeHtml(riotId)}</button>`
   ).join("");
+
   favoriteList.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => search(button.dataset.riotId));
   });
@@ -1254,13 +1359,17 @@ function renderFavoriteSearches() {
 
 function handleInitialQuery() {
   if (location.pathname === "/champions") return;
+
   const params = new URLSearchParams(location.search);
+
   if (params.get("demo") === "true") {
     showDemoData();
     return;
   }
+
   const riotId = params.get("riotId");
   const tag = params.get("tag");
+
   if (riotId && tag) {
     search(`${riotId}#${tag}`);
   }
@@ -1283,12 +1392,16 @@ function formatDuration(seconds) {
 function formatRelativeTime(timestamp) {
   const elapsed = Math.max(0, Date.now() - timestamp);
   const minutes = Math.floor(elapsed / 60000);
+
   if (minutes < 1) return "방금 전";
   if (minutes < 60) return `${minutes}분 전`;
+
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}시간 전`;
+
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}일 전`;
+
   return new Date(timestamp).toLocaleDateString("ko-KR");
 }
 
@@ -1312,6 +1425,7 @@ function capitalize(value) {
 function createDemoData() {
   const version = "16.11.1";
   const puuid = "demo-player-puuid";
+
   const champions = [
     { id: "Ahri", name: "아리", key: 103 },
     { id: "LeeSin", name: "리 신", key: 64 },
@@ -1319,7 +1433,9 @@ function createDemoData() {
     { id: "Ashe", name: "애쉬", key: 22 },
     { id: "Thresh", name: "쓰레쉬", key: 412 }
   ];
+
   const matchChampions = ["Ahri", "LeeSin", "Ezreal", "Ashe", "Thresh", "Jinx", "Orianna", "Caitlyn"];
+
   const staticChampions = Object.fromEntries(
     champions.map((champion) => [
       String(champion.key),
@@ -1330,6 +1446,7 @@ function createDemoData() {
   const matches = Array.from({ length: 15 }, (_, index) => {
     const championName = matchChampions[index % matchChampions.length];
     const win = index % 3 !== 2;
+
     const player = {
       puuid,
       teamId: 100,
@@ -1363,6 +1480,7 @@ function createDemoData() {
         ]
       }
     };
+
     const allies = [
       ["Garen", "Top Sample", "TOP"],
       ["Vi", "Jungle Sample", "JUNGLE"],
@@ -1371,6 +1489,7 @@ function createDemoData() {
     ].map(([name, playerName, position], allyIndex) =>
       mockParticipant(100, name, playerName, position, win, allyIndex)
     );
+
     const enemies = [
       ["Darius", "Opponent Top", "TOP"],
       ["Viego", "Opponent Jungle", "JUNGLE"],
