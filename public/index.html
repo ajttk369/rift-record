@@ -4,9 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="리그 오브 레전드 한국 서버 전적 검색">
+    <meta name="theme-color" content="#15181d">
     <title>Rift Record - 롤 전적검색</title>
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("rift-record-theme") || "light";
+          document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
+        } catch {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://ddragon.leagueoflegends.com">
-    <link rel="stylesheet" href="/styles.css?v=19">
+    <link rel="stylesheet" href="/styles.css?v=23">
   </head>
   <body>
     <header class="topbar">
@@ -18,7 +30,13 @@
         <a class="active" href="/" data-page="search">전적검색</a>
         <a href="/champions" data-page="tiers">챔피언 티어</a>
       </nav>
-      <span class="server-badge">KR</span>
+      <div class="header-actions">
+        <span class="server-badge">KR</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="다크 모드로 전환">
+          <span class="theme-toggle-icon" aria-hidden="true">☀</span>
+          <span class="theme-toggle-label">Light</span>
+        </button>
+      </div>
     </header>
 
     <main>
@@ -216,7 +234,10 @@
               <strong>상세 분석 보기</strong>
               <small>최근 경기 흐름, 추천픽, 개선 포인트 확인</small>
             </span>
-            <b aria-hidden="true"></b>
+            <span class="analysis-toggle-action">
+              <em>열기</em>
+              <b aria-hidden="true"></b>
+            </span>
           </button>
 
           <section id="detailed-analysis" class="detailed-analysis" hidden>
@@ -318,7 +339,8 @@
             </div>
             <div class="filter-tabs" role="tablist" aria-label="게임 유형 필터">
               <button class="active" type="button" data-filter="all">전체</button>
-              <button type="button" data-filter="ranked">랭크</button>
+              <button type="button" data-filter="solo">솔로랭크</button>
+              <button type="button" data-filter="flex">자유랭크 5대5</button>
               <button type="button" data-filter="normal">일반</button>
               <button type="button" data-filter="aram">칼바람</button>
             </div>
@@ -441,6 +463,6 @@
       <p>Rift Record is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p>
     </footer>
 
-    <script type="module" src="/app.js?v=19"></script>
+    <script type="module" src="/app.js?v=23"></script>
   </body>
 </html>

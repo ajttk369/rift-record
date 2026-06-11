@@ -7,7 +7,7 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.js" },
     { "src": "/assets/(.*)", "dest": "/public/assets/$1" },
-    { "src": "/(app.js|styles.css)", "dest": "/public/$1" },
+    { "src": "/(app.js|styles.css|favicon.svg)", "dest": "/public/$1" },
     { "src": "/(.*)", "dest": "/public/index.html" }
   ]
 }

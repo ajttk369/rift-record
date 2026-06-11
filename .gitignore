@@ -2,7 +2,6 @@
 .env.local
 node_modules/
 data/*.json
-server.log
-server-error.log
+*.log
 .vercel/
 .DS_Store

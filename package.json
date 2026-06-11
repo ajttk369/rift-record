@@ -1,11 +1,16 @@
 {
   "name": "rift-record",
   "version": "1.0.0",
+  "description": "League of Legends and Teamfight Tactics match analytics portfolio",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node server.mjs",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "check": "node --check public/app.js && node --check server.mjs && node --check src/api-core.mjs && node --check src/match-store.mjs && node --check src/supabase-server.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0"

@@ -36,6 +36,7 @@ const tftError = document.querySelector("#tft-error");
 const tftErrorMessage = document.querySelector("#tft-error-message");
 const tftContent = document.querySelector("#tft-content");
 const tftRetryButton = document.querySelector("#tft-retry-button");
+const themeToggle = document.querySelector("#theme-toggle");
 
 let currentData = null;
 let currentTftData = null;
@@ -54,6 +55,7 @@ let activeTierSort = "tierScore";
 
 renderRecentSearches();
 renderFavoriteSearches();
+syncThemeToggle();
 setView("welcome");
 handlePageRoute();
 
@@ -98,6 +100,8 @@ detailedAnalysisToggle.addEventListener("click", () => {
   detailedAnalysisToggle.setAttribute("aria-expanded", String(expanded));
   detailedAnalysisToggle.querySelector("strong").textContent =
     expanded ? "상세 분석 접기" : "상세 분석 보기";
+  detailedAnalysisToggle.querySelector(".analysis-toggle-action em").textContent =
+    expanded ? "닫기" : "열기";
 });
 
 document.querySelectorAll("[data-game-tab]").forEach((button) => {
@@ -105,6 +109,7 @@ document.querySelectorAll("[data-game-tab]").forEach((button) => {
 });
 
 tftRetryButton.addEventListener("click", () => loadTftData(true));
+themeToggle.addEventListener("click", toggleTheme);
 
 document.querySelectorAll(".filter-tabs button").forEach((button) => {
   button.addEventListener("click", () => {
@@ -142,6 +147,27 @@ document.querySelector("#tier-sort").addEventListener("change", (event) => {
 seedButton.addEventListener("click", seedChampionStats);
 demoButton.addEventListener("click", showDemoData);
 handleInitialQuery();
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+
+  try {
+    localStorage.setItem("rift-record-theme", nextTheme);
+  } catch {
+    // The selected theme still applies for the current page session.
+  }
+
+  syncThemeToggle();
+}
+
+function syncThemeToggle() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  themeToggle.querySelector(".theme-toggle-label").textContent = isDark ? "Dark" : "Light";
+  themeToggle.querySelector(".theme-toggle-icon").textContent = isDark ? "☾" : "☀";
+  themeToggle.setAttribute("aria-label", isDark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  themeToggle.setAttribute("aria-pressed", String(isDark));
+}
 
 function showDemoData() {
   currentRiotId = "";
@@ -318,6 +344,7 @@ async function search(rawRiotId) {
     }
 
     currentData = data;
+    currentData.rankTracking = updateRankSnapshots(data);
     currentTftData = null;
     tftLoadingPromise = null;
     tftRequestVersion += 1;
@@ -362,6 +389,8 @@ function parseRiotId(value) {
 function setView(view) {
   championTiers.hidden = true;
   searchBand.hidden = false;
+  searchBand.classList.toggle("has-results", view === "results");
+  document.body.classList.toggle("has-search-results", view === "results");
   projectInfo.hidden = false;
   welcome.hidden = view !== "welcome";
   loading.hidden = view !== "loading";
@@ -374,6 +403,7 @@ function resetDetailedAnalysis() {
   detailedAnalysisToggle.classList.remove("active");
   detailedAnalysisToggle.setAttribute("aria-expanded", "false");
   detailedAnalysisToggle.querySelector("strong").textContent = "상세 분석 보기";
+  detailedAnalysisToggle.querySelector(".analysis-toggle-action em").textContent = "열기";
 }
 
 function showError(message) {
@@ -1433,6 +1463,15 @@ function renderMatches(data) {
       button.setAttribute("aria-expanded", String(isOpen));
     });
   });
+
+  matchList.querySelectorAll(".participant-search").forEach((button) => {
+    button.addEventListener("click", () => {
+      const riotId = button.dataset.riotId;
+      if (!riotId) return;
+      input.value = riotId;
+      search(riotId);
+    });
+  });
 }
 
 function matchCard(match, data) {
@@ -1460,13 +1499,14 @@ function matchCard(match, data) {
   const result = player.win ? "승리" : "패배";
   const resultClass = player.win ? "win" : "loss";
   const gameCreated = match.info.gameCreation || match.info.gameStartTimestamp;
+  const lpBadge = renderLpTrackingBadge(match, data, queue);
 
   return `
     <article class="match-card ${resultClass}" data-category="${queue.category}">
       <div class="result-bar"></div>
       <div class="match-content">
         <div class="match-meta">
-          <strong>${result}</strong>
+          <div class="match-result-line"><strong>${result}</strong>${lpBadge}</div>
           <span>${escapeHtml(queue.label)}</span>
           <span>${formatRelativeTime(gameCreated)}</span>
           <span>${duration}</span>
@@ -1479,10 +1519,10 @@ function matchCard(match, data) {
           <div class="kda">
             <strong>${player.kills} / ${player.deaths} / ${player.assists}</strong>
             <span>${kda} KDA</span>
-            <div class="build-row">
-              <div class="rune-row">${renderRunes(player, data)}</div>
-              <div class="item-row">${renderItems(player, data.ddragonVersion)}</div>
-            </div>
+          </div>
+          <div class="build-row">
+            <div class="rune-row">${renderRunes(player, data)}</div>
+            <div class="item-row">${renderItems(player, data.ddragonVersion)}</div>
           </div>
         </div>
         <div class="performance">
@@ -1490,7 +1530,9 @@ function matchCard(match, data) {
           <div><strong>${number(player.totalDamageDealtToChampions)}</strong><span>챔피언 피해량</span></div>
           <div><strong>${killParticipation}%</strong><span>킬 관여</span></div>
         </div>
-        <button class="details-button" type="button" aria-label="참가자 상세 보기" aria-expanded="false">⌄</button>
+        <button class="details-button" type="button" aria-label="참가자 상세 보기" aria-expanded="false">
+          <span aria-hidden="true">⌄</span>
+        </button>
       </div>
       <div class="match-details">
         <div class="match-analysis-detail">
@@ -1590,15 +1632,32 @@ function teamColumn(label, participants, data) {
   return `
     <div class="team">
       <h3>${label}</h3>
-      ${participants.map((participant) => `
+      ${participants.map((participant) => {
+        const riotId = participantRiotId(participant);
+        const displayName = participant.riotIdGameName || participant.summonerName || "Unknown";
+        return `
         <div class="participant ${isCurrentParticipant(participant, data.account) ? "current" : ""}">
           <img src="${championImage(data.ddragonVersion, participant.championName)}" alt="">
-          <span class="participant-name">${escapeHtml(participant.riotIdGameName || participant.summonerName || "Unknown")}</span>
+          ${riotId
+            ? `<button class="participant-name participant-search" type="button" data-riot-id="${escapeHtml(riotId)}" title="${escapeHtml(`${riotId} 전적 검색`)}">${escapeHtml(displayName)}</button>`
+            : `<span class="participant-name">${escapeHtml(displayName)}</span>`}
           <span class="participant-kda">${participant.kills}/${participant.deaths}/${participant.assists}</span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
+}
+
+function participantRiotId(participant) {
+  const gameName = String(participant?.riotIdGameName || participant?.gameName || "").trim();
+  const tagLine = String(
+    participant?.riotIdTagline
+    || participant?.riotIdTagLine
+    || participant?.tagLine
+    || ""
+  ).trim();
+  return gameName && tagLine ? `${gameName}#${tagLine}` : "";
 }
 
 function getCurrentParticipant(match, account) {
@@ -1641,9 +1700,9 @@ function normalizeName(value) {
 
 function getQueueType(queueId) {
   const queues = {
-    420: { label: "솔로 랭크", category: "ranked" },
+    420: { label: "솔로 랭크", category: "solo", queueType: "RANKED_SOLO_5x5" },
     430: { label: "일반 교차", category: "normal" },
-    440: { label: "자유 랭크", category: "ranked" },
+    440: { label: "자유 랭크 5대5", category: "flex", queueType: "RANKED_FLEX_SR" },
     450: { label: "무작위 총력전", category: "aram" },
     490: { label: "빠른 대전", category: "normal" },
     400: { label: "일반 선택", category: "other" },
@@ -1651,6 +1710,98 @@ function getQueueType(queueId) {
     1700: { label: "아레나", category: "other" }
   };
   return queues[queueId] || { label: "기타 모드", category: "other" };
+}
+
+function updateRankSnapshots(data) {
+  if (!data?.account?.puuid || data.isDemo) return {};
+
+  const key = `rift-record-rank-snapshots:${data.account.puuid}`;
+  let previous = {};
+
+  try {
+    previous = JSON.parse(localStorage.getItem(key) || "{}");
+  } catch {
+    previous = {};
+  }
+
+  const current = {};
+  const tracking = {};
+
+  for (const entry of data.ranked || []) {
+    if (!["RANKED_SOLO_5x5", "RANKED_FLEX_SR"].includes(entry.queueType)) continue;
+
+    const snapshot = {
+      puuid: data.account.puuid,
+      queueType: entry.queueType,
+      tier: entry.tier,
+      rank: entry.rank,
+      leaguePoints: Number(entry.leaguePoints || 0),
+      wins: Number(entry.wins || 0),
+      losses: Number(entry.losses || 0),
+      updatedAt: new Date().toISOString()
+    };
+    const oldSnapshot = previous[entry.queueType];
+    const delta = oldSnapshot
+      ? rankSnapshotScore(snapshot) - rankSnapshotScore(oldSnapshot)
+      : null;
+
+    current[entry.queueType] = snapshot;
+    tracking[entry.queueType] = {
+      delta,
+      status: oldSnapshot ? "tracked" : "pending",
+      previousUpdatedAt: oldSnapshot?.updatedAt || null,
+      latestMatchId: data.matches.find(
+        (match) => getQueueType(match.info.queueId).queueType === entry.queueType
+      )?.metadata?.matchId || null
+    };
+  }
+
+  try {
+    localStorage.setItem(key, JSON.stringify(current));
+  } catch {
+    // Rank tracking remains unavailable when storage is blocked.
+  }
+
+  return tracking;
+}
+
+function rankSnapshotScore(snapshot) {
+  const tiers = {
+    IRON: 0,
+    BRONZE: 1,
+    SILVER: 2,
+    GOLD: 3,
+    PLATINUM: 4,
+    EMERALD: 5,
+    DIAMOND: 6,
+    MASTER: 7,
+    GRANDMASTER: 8,
+    CHALLENGER: 9
+  };
+  const divisions = { IV: 0, III: 1, II: 2, I: 3 };
+  const tier = tiers[String(snapshot?.tier || "").toUpperCase()];
+  const division = divisions[String(snapshot?.rank || "").toUpperCase()] ?? 0;
+  if (tier === undefined) return Number(snapshot?.leaguePoints || 0);
+  return tier * 400 + division * 100 + Number(snapshot?.leaguePoints || 0);
+}
+
+function renderLpTrackingBadge(match, data, queue) {
+  if (!queue.queueType) return "";
+
+  const tracking = data.rankTracking?.[queue.queueType];
+  if (!tracking || tracking.status === "pending") {
+    return '<span class="lp-change-badge neutral">LP 추적 전</span>';
+  }
+
+  const matchId = match.metadata?.matchId;
+  if (!tracking.latestMatchId || tracking.latestMatchId !== matchId) {
+    return '<span class="lp-change-badge neutral">LP 기록 없음</span>';
+  }
+
+  const delta = Number(tracking.delta || 0);
+  const sign = delta > 0 ? "+" : "";
+  const tone = delta > 0 ? "positive" : delta < 0 ? "negative" : "neutral";
+  return `<span class="lp-change-badge ${tone}" title="이전 검색 시점 대비 변화입니다.">최근 LP ${sign}${delta}</span>`;
 }
 
 function saveRecentSearch(riotId) {
