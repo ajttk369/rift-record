@@ -6,7 +6,7 @@
     <meta name="description" content="리그 오브 레전드 한국 서버 전적 검색">
     <title>Rift Record - 롤 전적검색</title>
     <link rel="preconnect" href="https://ddragon.leagueoflegends.com">
-    <link rel="stylesheet" href="/styles.css?v=9">
+    <link rel="stylesheet" href="/styles.css?v=19">
   </head>
   <body>
     <header class="topbar">
@@ -159,221 +159,288 @@
       </section>
 
       <section id="results" class="results" hidden>
+        <div class="game-tabs" role="tablist" aria-label="게임 전적 선택">
+          <button id="lol-tab" class="active" type="button" role="tab" aria-selected="true" aria-controls="lol-results" data-game-tab="lol">소환사의 협곡</button>
+          <button id="tft-tab" type="button" role="tab" aria-selected="false" aria-controls="tft-results" data-game-tab="tft">롤토체스</button>
+        </div>
+
+        <div id="lol-results" class="game-result-panel" role="tabpanel" aria-labelledby="lol-tab">
         <div class="profile-band">
           <div class="profile-inner">
-            <div class="profile-icon-wrap">
-              <img id="profile-icon" alt="">
-              <span id="summoner-level"></span>
+            <div class="profile-primary">
+              <div class="profile-icon-wrap">
+                <img id="profile-icon" alt="">
+                <span id="summoner-level"></span>
+              </div>
+              <div class="identity">
+                <p><span id="demo-badge" class="demo-badge" hidden>DEMO MODE · MOCK DATA</span><span id="queue-label">KR SERVER</span></p>
+                <h2><span id="game-name"></span><small id="tag-line"></small></h2>
+                <span id="updated-at"></span>
+              </div>
+              <div class="profile-actions">
+                <button id="favorite-button" class="favorite-button" type="button" title="즐겨찾기 추가" aria-label="즐겨찾기 추가">☆</button>
+                <button id="refresh-button" class="refresh-button" type="button" title="전적 새로고침" aria-label="전적 새로고침">↻</button>
+              </div>
             </div>
-            <div class="identity">
-              <p><span id="demo-badge" class="demo-badge" hidden>DEMO MODE · MOCK DATA</span><span id="queue-label">KR · SOLO QUEUE</span></p>
-              <h2><span id="game-name"></span><small id="tag-line"></small></h2>
-              <span id="updated-at"></span>
-            </div>
-            <div class="profile-actions">
-              <button id="favorite-button" class="favorite-button" type="button" title="즐겨찾기 추가" aria-label="즐겨찾기 추가">☆</button>
-              <button id="refresh-button" class="refresh-button" type="button" title="전적 새로고침" aria-label="전적 새로고침">↻</button>
+            <div class="profile-overview">
+              <div id="profile-ranks" class="profile-ranks"></div>
+              <div class="profile-mastery">
+                <span>대표 챔피언</span>
+                <div id="profile-mastery-list"></div>
+              </div>
             </div>
           </div>
           <p id="persistence-warning" class="persistence-warning" hidden></p>
         </div>
 
-        <div class="analysis-dashboard">
-          <details class="criteria-panel">
-            <summary>분석 기준 보기</summary>
-            <div class="criteria-grid">
-              <p><strong>분석 범위</strong> 최근 솔로랭크 15경기</p>
-              <p><strong>KDA</strong> (Kills + Assists) / max(Deaths, 1)</p>
-              <p><strong>킬 관여율</strong> (Kills + Assists) / Team Kills × 100</p>
-              <p><strong>CS/분</strong> (라인 CS + 정글 CS) / 게임 시간(분)</p>
-              <p><strong>플레이스타일</strong> KDA, 킬 관여율, CS/분, 시야, 딜량 조합</p>
-              <p><strong>챔피언 성과</strong> 최근 15경기에서 해당 챔피언을 플레이한 기록</p>
-            </div>
-          </details>
+        <div class="results-content">
           <section class="analysis-section summary-dashboard-section">
             <div class="analysis-heading">
               <div>
                 <span class="section-number">01</span>
                 <h2>최근 15게임 요약</h2>
               </div>
-              <small>최근 솔로랭크 기준</small>
+              <small>최근 15경기 기준</small>
             </div>
             <div id="analysis-summary" class="analysis-summary-grid"></div>
           </section>
 
-          <section class="analysis-section playstyle-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">02</span>
-                <h2>플레이 스타일 분석</h2>
-              </div>
-              <small>최근 15게임 기준</small>
+          <button
+            id="detailed-analysis-toggle"
+            class="detailed-analysis-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="detailed-analysis"
+          >
+            <span>
+              <strong>상세 분석 보기</strong>
+              <small>최근 경기 흐름, 추천픽, 개선 포인트 확인</small>
+            </span>
+            <b aria-hidden="true"></b>
+          </button>
+
+          <section id="detailed-analysis" class="detailed-analysis" hidden>
+            <div class="analysis-dashboard">
+              <details class="criteria-panel">
+                <summary>분석 기준 보기</summary>
+                <div class="criteria-grid">
+                  <p><strong>분석 범위</strong> 최근 15경기</p>
+                  <p><strong>KDA</strong> (Kills + Assists) / max(Deaths, 1)</p>
+                  <p><strong>킬 관여율</strong> (Kills + Assists) / Team Kills × 100</p>
+                  <p><strong>CS/분</strong> (라인 CS + 정글 CS) / 게임 시간(분)</p>
+                  <p><strong>플레이스타일</strong> KDA, 킬 관여율, CS/분, 시야, 딜량 조합</p>
+                  <p><strong>챔피언 성과</strong> 최근 15경기에서 해당 챔피언을 플레이한 기록</p>
+                </div>
+              </details>
+
+              <section class="analysis-section playstyle-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">03</span>
+                    <h2>플레이 스타일 분석</h2>
+                  </div>
+                  <small>최근 15게임 기준</small>
+                </div>
+                <div id="playstyle-analysis"></div>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">04</span>
+                    <h2>경기 하이라이트</h2>
+                  </div>
+                </div>
+                <div id="match-highlights" class="highlight-grid"></div>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">05</span>
+                    <h2>챔피언별 성과</h2>
+                  </div>
+                </div>
+                <div id="champion-performance" class="personal-performance-list"></div>
+                <button id="champion-performance-toggle" class="section-toggle-button" type="button" hidden>전체 보기</button>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">06</span>
+                    <h2>Recommended Picks</h2>
+                  </div>
+                  <small>최근 15경기 개인 성과 기준 추천 챔피언입니다.</small>
+                </div>
+                <div id="recommended-picks" class="recommended-grid"></div>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">07</span>
+                    <h2>포지션별 성과</h2>
+                  </div>
+                </div>
+                <div id="position-performance" class="position-performance-grid"></div>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">08</span>
+                    <h2>최근 경기 흐름</h2>
+                  </div>
+                </div>
+                <div id="recent-trends" class="trend-panel"></div>
+              </section>
+
+              <section class="analysis-section">
+                <div class="analysis-heading">
+                  <div>
+                    <span class="section-number">09</span>
+                    <h2>개선 포인트</h2>
+                  </div>
+                  <small>최근 경기 기반 참고 의견</small>
+                </div>
+                <div id="improvement-tips" class="improvement-grid"></div>
+              </section>
             </div>
-            <div id="playstyle-analysis"></div>
           </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">03</span>
-                <h2>경기 하이라이트</h2>
-              </div>
-            </div>
-            <div id="match-highlights" class="highlight-grid"></div>
-          </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">04</span>
-                <h2>챔피언별 성과</h2>
-              </div>
-            </div>
-            <div id="champion-performance" class="personal-performance-list"></div>
-            <button id="champion-performance-toggle" class="section-toggle-button" type="button" hidden>전체 보기</button>
-          </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">05</span>
-                <h2>Recommended Picks</h2>
-              </div>
-              <small>최근 15경기 개인 성과 기준 추천 챔피언입니다.</small>
-            </div>
-            <div id="recommended-picks" class="recommended-grid"></div>
-          </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">06</span>
-                <h2>포지션별 성과</h2>
-              </div>
-            </div>
-            <div id="position-performance" class="position-performance-grid"></div>
-          </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">07</span>
-                <h2>최근 경기 흐름</h2>
-              </div>
-            </div>
-            <div id="recent-trends" class="trend-panel"></div>
-          </section>
-
-          <section class="analysis-section">
-            <div class="analysis-heading">
-              <div>
-                <span class="section-number">08</span>
-                <h2>개선 포인트</h2>
-              </div>
-              <small>최근 경기 기반 참고 의견</small>
-            </div>
-            <div id="improvement-tips" class="improvement-grid"></div>
-          </section>
-        </div>
-
-        <div class="dashboard">
-          <aside id="rank" class="sidebar">
-            <section class="panel rank-panel">
-              <div class="panel-heading">
-                <span>솔로 랭크</span>
-                <small>RANKED SOLO</small>
-              </div>
-              <div id="rank-content"></div>
-            </section>
-
-            <section class="panel summary-panel">
-              <div class="panel-heading">
-                <span>최근 요약</span>
-                <small>LAST 15 GAMES</small>
-              </div>
-              <div id="summary-content"></div>
-            </section>
-
-            <section class="panel mastery-panel">
-              <div class="panel-heading">
-                <span>챔피언 숙련도</span>
-                <small>TOP 5</small>
-              </div>
-              <div id="mastery-content"></div>
-            </section>
-          </aside>
 
           <section id="matches" class="match-section">
             <div class="match-toolbar">
               <div>
-                <span class="section-number">09</span>
+                <span class="section-number">02</span>
                 <h2>최근 게임</h2>
               </div>
-              <div class="filter-tabs" role="tablist" aria-label="게임 필터">
-                <button class="active" type="button" data-filter="all">전체</button>
-                <button type="button" data-filter="ranked">랭크</button>
-                <button type="button" data-filter="normal">일반</button>
-              </div>
+            </div>
+            <div class="filter-tabs" role="tablist" aria-label="게임 유형 필터">
+              <button class="active" type="button" data-filter="all">전체</button>
+              <button type="button" data-filter="ranked">랭크</button>
+              <button type="button" data-filter="normal">일반</button>
+              <button type="button" data-filter="aram">칼바람</button>
             </div>
             <div id="match-list" class="match-list"></div>
             <p id="empty-matches" class="empty-matches" hidden>해당 조건의 게임이 없습니다.</p>
             <button id="match-list-toggle" class="section-toggle-button match-list-toggle" type="button" hidden>더 보기</button>
           </section>
+
+          <a class="tier-preview-link" href="/champions">
+            <span>
+              <small>수집 데이터 기반 참고 지표</small>
+              <strong>라인별 챔피언 티어표 보기</strong>
+            </span>
+            <b aria-hidden="true">→</b>
+          </a>
         </div>
-        <a class="tier-preview-link" href="/champions">
+        </div>
+
+        <section id="tft-results" class="game-result-panel tft-results" role="tabpanel" aria-labelledby="tft-tab" hidden>
+          <div id="tft-loading" class="tft-state">
+            <span class="spinner"></span>
+            <strong>롤토체스 전적을 불러오는 중입니다.</strong>
+          </div>
+
+          <div id="tft-error" class="tft-state tft-error" hidden>
+            <strong>롤토체스 전적을 불러오지 못했습니다.</strong>
+            <p id="tft-error-message"></p>
+            <button id="tft-retry-button" type="button">다시 시도</button>
+          </div>
+
+          <div id="tft-content" hidden>
+            <section class="tft-profile">
+              <div class="tft-profile-identity">
+                <div class="tft-profile-icon">
+                  <img id="tft-profile-icon" alt="">
+                  <span id="tft-level"></span>
+                </div>
+                <div>
+                  <small>TFT · KR</small>
+                  <h2><span id="tft-game-name"></span><b id="tft-tag-line"></b></h2>
+                  <span id="tft-updated-at"></span>
+                </div>
+              </div>
+              <div id="tft-rank" class="tft-rank"></div>
+            </section>
+
+            <div class="tft-content-inner">
+              <section class="tft-summary-section">
+                <div class="analysis-heading">
+                  <div><span class="section-number">TFT 01</span><h2>최근 10게임 요약</h2></div>
+                </div>
+                <div id="tft-summary" class="tft-summary"></div>
+              </section>
+
+              <section class="tft-match-section">
+                <div class="analysis-heading">
+                  <div><span class="section-number">TFT 02</span><h2>최근 TFT 게임</h2></div>
+                </div>
+                <div id="tft-match-list" class="tft-match-list"></div>
+                <p id="tft-empty-matches" class="empty-matches" hidden>최근 롤토체스 전적이 없습니다.</p>
+              </section>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <details id="project-info" class="project-info">
+        <summary>
           <span>
-            <small>수집 데이터 기반 참고 지표</small>
-            <strong>라인별 챔피언 티어표 보기</strong>
+            <strong>Project Info</strong>
+            <small>구현 내용, 데이터 처리와 보안 설계</small>
           </span>
-          <b aria-hidden="true">→</b>
-        </a>
-      </section>
+          <b aria-hidden="true"></b>
+        </summary>
+        <div class="project-info-content">
+          <section id="what-i-built" class="project-notes what-i-built">
+            <div class="project-notes-heading">
+              <span class="section-number">WHAT I BUILT</span>
+              <h2>Rift Record 구현 내용</h2>
+            </div>
+            <div class="built-grid">
+              <article><strong>Riot API Integration</strong><p>Riot ID, 최근 솔로 랭크, 랭크 정보와 챔피언 숙련도를 서버 API로 조회합니다.</p></article>
+              <article><strong>Match Data Analysis</strong><p>KDA, CS/분, 킬 관여율, 피해량과 시야 점수를 최근 15경기 기준으로 분석합니다.</p></article>
+              <article><strong>Custom Champion Tier</strong><p>수집된 participant 데이터로 라인별 자체 티어를 계산하고 Low Sample을 표시합니다.</p></article>
+              <article><strong>Secure API Handling</strong><p>Riot API Key와 Supabase Service Role Key를 서버 환경변수로만 관리합니다.</p></article>
+              <article><strong>Persistent Database</strong><p>Supabase에 match와 participant를 저장해 Vercel에서도 수집 결과를 유지합니다.</p></article>
+              <article><strong>Demo Mode</strong><p>API Key나 DB 설정과 무관하게 주요 분석 기능을 확인할 수 있는 mock data를 제공합니다.</p></article>
+            </div>
+          </section>
 
-      <section id="what-i-built" class="project-notes what-i-built">
-        <div class="project-notes-heading">
-          <span class="section-number">WHAT I BUILT</span>
-          <h2>Rift Record 구현 내용</h2>
+          <section id="project-notes" class="project-notes">
+            <div class="project-notes-heading">
+              <span class="section-number">PROJECT NOTES</span>
+              <h2>데이터와 보안을 고려한<br>포트폴리오 MVP</h2>
+            </div>
+            <div class="project-notes-list">
+              <article>
+                <strong>01</strong>
+                <p>Riot API를 통해 match data를 수집하고, 중복 matchId를 방지해 캐싱합니다.</p>
+              </article>
+              <article>
+                <strong>02</strong>
+                <p>챔피언 티어는 공식 데이터가 아니라 수집 데이터 기반 자체 계산 지표입니다.</p>
+              </article>
+              <article>
+                <strong>03</strong>
+                <p>API Key는 서버 환경변수로 관리하며 클라이언트에 노출하지 않습니다.</p>
+              </article>
+              <article>
+                <strong>04</strong>
+                <p>개인 포트폴리오 및 채용 검토용 데모입니다.</p>
+              </article>
+            </div>
+          </section>
         </div>
-        <div class="built-grid">
-          <article><strong>Riot API Integration</strong><p>Riot ID, 최근 솔로 랭크, 랭크 정보와 챔피언 숙련도를 서버 API로 조회합니다.</p></article>
-          <article><strong>Match Data Analysis</strong><p>KDA, CS/분, 킬 관여율, 피해량과 시야 점수를 최근 15경기 기준으로 분석합니다.</p></article>
-          <article><strong>Custom Champion Tier</strong><p>수집된 participant 데이터로 라인별 자체 티어를 계산하고 Low Sample을 표시합니다.</p></article>
-          <article><strong>Secure API Handling</strong><p>Riot API Key와 Supabase Service Role Key를 서버 환경변수로만 관리합니다.</p></article>
-          <article><strong>Persistent Database</strong><p>Supabase에 match와 participant를 저장해 Vercel에서도 수집 결과를 유지합니다.</p></article>
-          <article><strong>Demo Mode</strong><p>API Key나 DB 설정과 무관하게 주요 분석 기능을 확인할 수 있는 mock data를 제공합니다.</p></article>
-        </div>
-      </section>
-
-      <section id="project-notes" class="project-notes">
-        <div class="project-notes-heading">
-          <span class="section-number">PROJECT NOTES</span>
-          <h2>데이터와 보안을 고려한<br>포트폴리오 MVP</h2>
-        </div>
-        <div class="project-notes-list">
-          <article>
-            <strong>01</strong>
-            <p>Riot API를 통해 match data를 수집하고, 중복 matchId를 방지해 캐싱합니다.</p>
-          </article>
-          <article>
-            <strong>02</strong>
-            <p>챔피언 티어는 공식 데이터가 아니라 수집 데이터 기반 자체 계산 지표입니다.</p>
-          </article>
-          <article>
-            <strong>03</strong>
-            <p>API Key는 서버 환경변수로 관리하며 클라이언트에 노출하지 않습니다.</p>
-          </article>
-          <article>
-            <strong>04</strong>
-            <p>개인 포트폴리오 및 채용 검토용 데모입니다.</p>
-          </article>
-        </div>
-      </section>
+      </details>
     </main>
 
     <footer>
       <p>Rift Record is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p>
     </footer>
 
-    <script type="module" src="/app.js?v=9"></script>
+    <script type="module" src="/app.js?v=19"></script>
   </body>
 </html>

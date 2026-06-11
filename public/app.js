@@ -23,13 +23,24 @@ const seedStatus = document.querySelector("#seed-status");
 const demoButton = document.querySelector("#demo-button");
 const demoBadge = document.querySelector("#demo-badge");
 const queueLabel = document.querySelector("#queue-label");
-const projectNotes = document.querySelector("#project-notes");
-const whatIBuilt = document.querySelector("#what-i-built");
+const projectInfo = document.querySelector("#project-info");
+const detailedAnalysis = document.querySelector("#detailed-analysis");
+const detailedAnalysisToggle = document.querySelector("#detailed-analysis-toggle");
 const clearRecentButton = document.querySelector("#clear-recent-button");
 const championPerformanceToggle = document.querySelector("#champion-performance-toggle");
 const matchListToggle = document.querySelector("#match-list-toggle");
+const lolResults = document.querySelector("#lol-results");
+const tftResults = document.querySelector("#tft-results");
+const tftLoading = document.querySelector("#tft-loading");
+const tftError = document.querySelector("#tft-error");
+const tftErrorMessage = document.querySelector("#tft-error-message");
+const tftContent = document.querySelector("#tft-content");
+const tftRetryButton = document.querySelector("#tft-retry-button");
 
 let currentData = null;
+let currentTftData = null;
+let tftLoadingPromise = null;
+let tftRequestVersion = 0;
 let currentRiotId = "";
 let activeFilter = "all";
 let currentAnalysis = null;
@@ -80,6 +91,21 @@ matchListToggle.addEventListener("click", () => {
   renderMatches(currentData);
 });
 
+detailedAnalysisToggle.addEventListener("click", () => {
+  const expanded = detailedAnalysis.hidden;
+  detailedAnalysis.hidden = !expanded;
+  detailedAnalysisToggle.classList.toggle("active", expanded);
+  detailedAnalysisToggle.setAttribute("aria-expanded", String(expanded));
+  detailedAnalysisToggle.querySelector("strong").textContent =
+    expanded ? "상세 분석 접기" : "상세 분석 보기";
+});
+
+document.querySelectorAll("[data-game-tab]").forEach((button) => {
+  button.addEventListener("click", () => selectGameTab(button.dataset.gameTab));
+});
+
+tftRetryButton.addEventListener("click", () => loadTftData(true));
+
 document.querySelectorAll(".filter-tabs button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelector(".filter-tabs button.active")?.classList.remove("active");
@@ -121,12 +147,22 @@ function showDemoData() {
   currentRiotId = "";
   championPerformanceExpanded = false;
   matchesExpanded = false;
+  activeFilter = "all";
+  resetDetailedAnalysis();
+  projectInfo.open = false;
+  document.querySelectorAll(".filter-tabs button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.filter === "all");
+  });
   personalTierStats = new Map([
     ["Ahri:MID", { tierGrade: "A", tierScore: 78.4, position: "MID" }],
     ["LeeSin:JUNGLE", { tierGrade: "B", tierScore: 66.1, position: "JUNGLE" }],
     ["Ezreal:ADC", { tierGrade: "A", tierScore: 74.8, position: "ADC" }]
   ]);
   currentData = createDemoData();
+  currentTftData = null;
+  tftLoadingPromise = null;
+  tftRequestVersion += 1;
+  selectGameTab("lol");
   history.replaceState(null, "", `${location.pathname}?demo=true`);
   renderProfile(currentData);
   setView("results");
@@ -160,8 +196,7 @@ async function handlePageRoute() {
   const showTiers = location.pathname === "/champions";
   championTiers.hidden = !showTiers;
   searchBand.hidden = showTiers;
-  projectNotes.hidden = showTiers;
-  whatIBuilt.hidden = showTiers;
+  projectInfo.hidden = showTiers;
   welcome.hidden = showTiers || Boolean(currentData);
   loading.hidden = true;
   errorPanel.hidden = true;
@@ -283,8 +318,14 @@ async function search(rawRiotId) {
     }
 
     currentData = data;
+    currentTftData = null;
+    tftLoadingPromise = null;
+    tftRequestVersion += 1;
+    selectGameTab("lol");
     championPerformanceExpanded = false;
     matchesExpanded = false;
+    resetDetailedAnalysis();
+    projectInfo.open = false;
     personalTierStats = new Map();
     activeFilter = "all";
 
@@ -321,12 +362,18 @@ function parseRiotId(value) {
 function setView(view) {
   championTiers.hidden = true;
   searchBand.hidden = false;
-  projectNotes.hidden = false;
-  whatIBuilt.hidden = false;
+  projectInfo.hidden = false;
   welcome.hidden = view !== "welcome";
   loading.hidden = view !== "loading";
   errorPanel.hidden = view !== "error";
   results.hidden = view !== "results";
+}
+
+function resetDetailedAnalysis() {
+  detailedAnalysis.hidden = true;
+  detailedAnalysisToggle.classList.remove("active");
+  detailedAnalysisToggle.setAttribute("aria-expanded", "false");
+  detailedAnalysisToggle.querySelector("strong").textContent = "상세 분석 보기";
 }
 
 function showError(message) {
@@ -356,10 +403,361 @@ function renderProfile(data) {
   updateFavoriteButton();
 
   renderRank(ranked);
-  renderSummary(data);
   renderMasteries(data);
   renderPersonalAnalysis(data);
   renderMatches(data);
+}
+
+function selectGameTab(tab) {
+  const showTft = tab === "tft";
+  lolResults.hidden = showTft;
+  tftResults.hidden = !showTft;
+
+  document.querySelectorAll("[data-game-tab]").forEach((button) => {
+    const active = button.dataset.gameTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  if (showTft && !currentTftData) {
+    loadTftData();
+  }
+}
+
+async function loadTftData(force = false) {
+  if (!currentData || (currentTftData && !force)) return;
+  if (tftLoadingPromise && !force) return tftLoadingPromise;
+
+  tftLoading.hidden = false;
+  tftError.hidden = true;
+  tftContent.hidden = true;
+  const requestVersion = ++tftRequestVersion;
+
+  tftLoadingPromise = (async () => {
+    try {
+      const data = currentData.isDemo
+        ? createDemoTftData(currentData)
+        : await fetchTftData();
+      if (requestVersion !== tftRequestVersion) return;
+      currentTftData = data;
+      renderTftProfile(data);
+      renderTftSummary(data);
+      renderTftMatches(data.tftMatches);
+      tftLoading.hidden = true;
+      tftContent.hidden = false;
+    } catch (error) {
+      if (requestVersion !== tftRequestVersion) return;
+      tftLoading.hidden = true;
+      tftError.hidden = false;
+      tftErrorMessage.textContent = error.message || "TFT 전적을 불러오지 못했습니다.";
+    } finally {
+      if (requestVersion === tftRequestVersion) {
+        tftLoadingPromise = null;
+      }
+    }
+  })();
+
+  return tftLoadingPromise;
+}
+
+async function fetchTftData() {
+  const params = new URLSearchParams({
+    gameName: currentData.account.gameName,
+    tagLine: currentData.account.tagLine,
+    puuid: currentData.account.puuid
+  });
+  const response = await fetch(`/api/tft?${params}`);
+  const data = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(getFriendlyError(response.status, data?.error));
+  }
+  return data;
+}
+
+function renderTftProfile(data) {
+  const summoner = data.tftSummoner;
+  const profileIconId = summoner?.profileIconId ?? currentData?.summoner?.profileIconId;
+  const profileIcon = document.querySelector("#tft-profile-icon");
+  profileIcon.src = ddragonUrl(currentData.ddragonVersion, `img/profileicon/${profileIconId}.png`);
+  profileIcon.alt = `${currentData.account.gameName} TFT 프로필 아이콘`;
+  document.querySelector("#tft-level").textContent =
+    summoner?.level || currentData?.summoner?.level || "-";
+  document.querySelector("#tft-game-name").textContent = currentData.account.gameName;
+  document.querySelector("#tft-tag-line").textContent = `#${currentData.account.tagLine}`;
+  document.querySelector("#tft-updated-at").textContent =
+    `${formatRelativeTime(new Date(data.updatedAt).getTime())} 업데이트`;
+
+  const rank = data.tftRank;
+  document.querySelector("#tft-rank").innerHTML = rank
+    ? `
+      <span>TFT RANK</span>
+      <div class="tft-rank-main">
+        <span
+          class="tft-rank-emblem"
+          role="img"
+          aria-label="${escapeHtml(`${capitalize(rank.tier)} ${rank.rank}`)} 엠블럼"
+          style="background-image:url('/assets/ranked/${escapeHtml(rank.tier.toLowerCase())}.png')"
+        ></span>
+        <div>
+          <strong>${escapeHtml(`${capitalize(rank.tier)} ${rank.rank}`)}</strong>
+          <b>${number(rank.leaguePoints)} LP</b>
+          <p>${number(rank.wins)}승 ${number(rank.losses)}패 · 승률 ${number(rank.winRate)}%</p>
+        </div>
+      </div>
+    `
+    : `
+      <span>TFT RANK</span>
+      <strong>${escapeHtml(data.tftRankError || "롤토체스 랭크 정보 없음")}</strong>
+      <p>${data.tftRankError?.includes("불러오지")
+        ? "랭크 API 응답을 확인해주세요."
+        : "이번 시즌 랭크 기록이 없습니다."}</p>
+    `;
+}
+
+function renderTftSummary(data) {
+  const summary = data.tftSummary;
+  const rank = data.tftRank;
+  const cards = [
+    ["TFT 티어", rank ? `${capitalize(rank.tier)} ${rank.rank}` : "Unranked"],
+    ["LP", rank ? `${number(rank.leaguePoints)} LP` : "-"],
+    ["평균 등수", summary.games ? `${Number(summary.averagePlacement).toFixed(1)}등` : "-"],
+    ["Top 4 비율", `${number(summary.topFourRate)}%`],
+    ["1등 횟수", `${number(summary.firstPlaces)}회`],
+    ["평균 레벨", Number(summary.averageLevel).toFixed(1)],
+    ["주요 특성", summary.mostTrait || "-"],
+    ["주요 유닛", summary.mostUnit || "-"]
+  ];
+
+  document.querySelector("#tft-summary").innerHTML = `
+    <div class="tft-summary-metrics">
+      ${cards.map(([label, value]) => `
+        <article><span>${label}</span><strong>${escapeHtml(value)}</strong></article>
+      `).join("")}
+    </div>
+    <article class="tft-placement-trend">
+      <div>
+        <span>최근 등수 추이</span>
+        <strong>낮을수록 좋은 기록</strong>
+      </div>
+      ${renderTftPlacementChart(data.tftMatches)}
+    </article>
+  `;
+}
+
+function renderTftMatches(matches) {
+  const list = document.querySelector("#tft-match-list");
+  const empty = document.querySelector("#tft-empty-matches");
+  empty.hidden = matches.length > 0;
+  list.innerHTML = matches.map(tftMatchCard).join("");
+  list.querySelectorAll(".tft-details-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const card = button.closest(".tft-match-card");
+      const isOpen = card.classList.toggle("is-expanded");
+      button.setAttribute("aria-expanded", String(isOpen));
+      button.querySelector("span").textContent = isOpen ? "접기" : "상세";
+    });
+  });
+}
+
+function tftMatchCard(match) {
+  const placementClass = match.placement === 1
+    ? "first"
+    : match.placement <= 4 ? "top-four" : "bottom-four";
+  const traits = match.traits.length
+    ? match.traits.map((trait) =>
+      `<span class="tft-trait tier-${Math.min(trait.style, 4)}" title="${escapeHtml(getTftTraitName(trait))}">
+        ${tftAssetImage("traits", trait, "tft-trait-icon")}
+        <span>${escapeHtml(getTftTraitName(trait))}</span><b>${trait.units}</b>
+      </span>`
+    ).join("")
+    : '<span class="tft-empty-chip">특성 정보 없음</span>';
+  const units = match.units.length
+    ? match.units.map(tftUnitPortrait).join("")
+    : '<span class="tft-empty-chip">유닛 정보 없음</span>';
+  const augments = match.augments.length
+    ? match.augments.map((augment) => `
+      <span class="tft-augment" title="${escapeHtml(getTftAugmentName(augment))}">
+        ${tftAssetImage("augments", augment, "tft-augment-icon")}
+        <span>${escapeHtml(getTftAugmentName(augment))}</span>
+      </span>
+    `).join("")
+    : '<span class="tft-empty-chip">증강체 정보 없음</span>';
+  const detailedUnits = match.units.length
+    ? match.units.map(tftDetailedUnit).join("")
+    : '<span class="tft-empty-chip">유닛 정보 없음</span>';
+
+  return `
+    <article class="tft-match-card tft-match-card-compact ${placementClass}">
+      <div class="tft-compact-main">
+        <div class="tft-placement">
+          <strong>${match.placement}</strong><span>등</span>
+          <b>${match.placement <= 4 ? "TOP 4" : "BOTTOM 4"}</b>
+        </div>
+        <div class="tft-match-meta">
+          <strong>${escapeHtml(tftQueueLabel(match.queueId, match.gameType))}</strong>
+          <span>${formatRelativeTime(match.gameDatetime)}</span>
+          <span>${formatDuration(Math.round(match.gameLength))}</span>
+          <div><b>Lv.${match.level}</b><b>라운드 ${escapeHtml(formatTftRound(match.lastRound))}</b></div>
+        </div>
+        <div class="tft-build-overview">
+          <div class="tft-build-topline">
+            <div class="tft-traits">${traits}</div>
+            <div class="tft-augments">${augments}</div>
+          </div>
+          <div class="tft-units">${units}</div>
+        </div>
+        <div class="tft-card-actions">
+          <span>${match.units.length} 유닛</span>
+          <button class="tft-details-button" type="button" aria-expanded="false">
+            <span>상세</span><b aria-hidden="true">⌄</b>
+          </button>
+        </div>
+      </div>
+      <div class="tft-match-details">
+        <div class="tft-detail-block tft-detail-units">
+          <span>전체 유닛 · 성급 · 아이템</span>
+          <div>${detailedUnits}</div>
+        </div>
+        <div class="tft-detail-block">
+          <span>경기 정보</span>
+          <dl>
+            <div><dt>최종 등수</dt><dd>${match.placement}등</dd></div>
+            <div><dt>레벨</dt><dd>Lv.${match.level}</dd></div>
+            <div><dt>최종 라운드</dt><dd>${escapeHtml(formatTftRound(match.lastRound))}</dd></div>
+            <div><dt>제거 시점</dt><dd>${escapeHtml(formatTftElimination(match.timeEliminated))}</dd></div>
+          </dl>
+        </div>
+        <div class="tft-detail-block tft-board-placeholder">
+          <span>배치도</span>
+          <p>추후 전장 배치 정보 확장을 위한 영역입니다.</p>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderTftPlacementChart(matches) {
+  if (!matches.length) return '<p class="tft-chart-empty">최근 경기 기록이 없습니다.</p>';
+  const width = 520;
+  const height = 112;
+  const paddingX = 20;
+  const paddingY = 12;
+  const points = matches.slice().reverse().map((match, index, entries) => {
+    const x = entries.length === 1
+      ? width / 2
+      : paddingX + (index / (entries.length - 1)) * (width - paddingX * 2);
+    const y = paddingY + ((Math.max(1, Math.min(8, match.placement)) - 1) / 7) * (height - paddingY * 2);
+    return { x, y, placement: match.placement };
+  });
+
+  return `
+    <svg class="tft-placement-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 10게임 등수 추이">
+      <line x1="${paddingX}" y1="${paddingY}" x2="${width - paddingX}" y2="${paddingY}" class="top-four-line"></line>
+      <line x1="${paddingX}" y1="${height / 2}" x2="${width - paddingX}" y2="${height / 2}" class="middle-line"></line>
+      <line x1="${paddingX}" y1="${height - paddingY}" x2="${width - paddingX}" y2="${height - paddingY}" class="bottom-line"></line>
+      <polyline points="${points.map(({ x, y }) => `${x},${y}`).join(" ")}"></polyline>
+      ${points.map(({ x, y, placement }) => `
+        <g>
+          <circle cx="${x}" cy="${y}" r="5"></circle>
+          <text x="${x}" y="${y - 9}" text-anchor="middle">${placement}</text>
+        </g>
+      `).join("")}
+    </svg>
+  `;
+}
+
+function tftUnitPortrait(unit) {
+  const name = getTftUnitName(unit);
+  const items = unit.items?.slice(0, 3) || [];
+  return `
+    <span class="tft-unit-portrait rarity-${Math.min(unit.rarity || 0, 5)}" title="${escapeHtml(`${name} · ${unit.tier}성`)}">
+      <span class="tft-unit-image">
+        ${tftAssetImage("units", unit, "tft-unit-icon")}
+        <b>${"★".repeat(Math.min(unit.tier, 3))}</b>
+      </span>
+      <span class="tft-item-icons">
+        ${items.map((item) => tftAssetImage("items", item, "tft-item-icon")).join("")}
+      </span>
+    </span>
+  `;
+}
+
+function tftDetailedUnit(unit) {
+  return `
+    <article class="tft-detailed-unit">
+      ${tftAssetImage("units", unit, "tft-detailed-unit-icon")}
+      <div>
+        <strong>${escapeHtml(getTftUnitName(unit))}</strong>
+        <span>${"★".repeat(Math.min(unit.tier, 3))}</span>
+        <small>${unit.items?.length
+          ? unit.items.map(getTftItemName).map(escapeHtml).join(" · ")
+          : "장착 아이템 없음"}</small>
+      </div>
+    </article>
+  `;
+}
+
+function getTftUnitName(unit) {
+  return getTftLocalizedName("units", unit);
+}
+
+function getTftTraitName(trait) {
+  return getTftLocalizedName("traits", trait);
+}
+
+function getTftAugmentName(augment) {
+  return getTftLocalizedName("augments", augment);
+}
+
+function getTftItemName(item) {
+  return getTftLocalizedName("items", item);
+}
+
+function getTftLocalizedName(type, entry) {
+  return getTftStaticEntry(type, entry).name;
+}
+
+function getTftStaticEntry(type, entry) {
+  const id = typeof entry === "string" ? entry : entry?.id;
+  const fallback = typeof entry === "string" ? entry : entry?.name;
+  const key = String(id || "").toLowerCase();
+  const staticEntry = currentTftData?.tftStaticData?.[type]?.[key];
+  if (typeof staticEntry === "string") {
+    return { name: staticEntry, imageUrl: null };
+  }
+  return {
+    name: staticEntry?.name || fallback || id || "-",
+    imageUrl: staticEntry?.imageUrl || null
+  };
+}
+
+function tftAssetImage(type, entry, className) {
+  const asset = getTftStaticEntry(type, entry);
+  if (!asset.imageUrl) {
+    return `<span class="${className} tft-asset-fallback">${escapeHtml(asset.name.slice(0, 1))}</span>`;
+  }
+  return `<img class="${className}" src="${escapeHtml(asset.imageUrl)}" alt="" loading="lazy" title="${escapeHtml(asset.name)}">`;
+}
+
+function tftQueueLabel(queueId, gameType) {
+  const labels = {
+    1090: "일반",
+    1100: "랭크",
+    1130: "초고속 모드",
+    1160: "더블 업"
+  };
+  return labels[queueId] || gameType || "TFT";
+}
+
+function formatTftRound(round) {
+  if (!round) return "-";
+  return `${Math.floor(round / 10)}-${round % 10}`;
+}
+
+function formatTftElimination(seconds) {
+  if (!seconds) return "-";
+  return formatDuration(Math.round(seconds));
 }
 
 async function parseJsonResponse(response) {
@@ -384,7 +782,8 @@ function getFriendlyError(status, serverMessage) {
     return "Riot API 요청 제한에 도달했습니다. 잠시 후 다시 시도해주세요.";
   }
   if (status === 401 || status === 403) {
-    return "Riot API Key가 만료되었거나 유효하지 않습니다. 서버 환경변수를 확인해주세요.";
+    return serverMessage ||
+      "Riot API Key가 만료되었거나 유효하지 않습니다. 서버 환경변수를 확인해주세요.";
   }
   return serverMessage || "전적을 불러오는 중 문제가 발생했습니다.";
 }
@@ -460,6 +859,7 @@ function analyzePlayerMatches(data) {
     deaths: avg(games, "deaths"),
     assists: avg(games, "assists"),
     killParticipation: avg(games, "killParticipation"),
+    cs: avg(games, "cs"),
     csPerMinute: avg(games, "csPerMinute"),
     visionScore: avg(games, "visionScore"),
     damage: avg(games, "damage"),
@@ -658,10 +1058,8 @@ function renderAnalysisSummary(analysis, data) {
   const cards = [
     ["최근 승률", `${analysis.averages.winRate.toFixed(0)}%`],
     ["평균 KDA", analysis.averages.kda.toFixed(2)],
-    ["평균 CS/분", analysis.averages.csPerMinute.toFixed(1)],
     ["평균 킬 관여율", `${analysis.averages.killParticipation.toFixed(0)}%`],
-    ["평균 딜량", number(Math.round(analysis.averages.damage))],
-    ["모스트 챔피언", championDisplayName(data, analysis.mostChampion)],
+    ["평균 CS", number(Math.round(analysis.averages.cs))],
     ["주 포지션", positionLabel(analysis.mainPosition)]
   ];
 
@@ -944,95 +1342,73 @@ function avg(items, key) {
 }
 
 function renderRank(entries) {
-  const container = document.querySelector("#rank-content");
-  const solo = entries.find((entry) => entry.queueType === "RANKED_SOLO_5x5");
+  const container = document.querySelector("#profile-ranks");
+  const queues = [
+    ["솔로 랭크", "RANKED_SOLO_5x5"],
+    ["자유 랭크", "RANKED_FLEX_SR"]
+  ];
 
-  if (!solo) {
-    container.innerHTML = '<p class="unranked">이번 시즌 솔로 랭크 기록이 없습니다.</p>';
-    return;
-  }
+  container.innerHTML = queues.map(([label, queueType]) => {
+    const entry = entries.find((rank) => rank.queueType === queueType);
+    if (!entry) {
+      return `
+        <article class="profile-rank-card unranked-card">
+          <span>${label}</span>
+          <strong>Unranked</strong>
+          <small>이번 시즌 기록 없음</small>
+        </article>
+      `;
+    }
 
-  const total = solo.wins + solo.losses;
-  const winRate = total ? Math.round((solo.wins / total) * 100) : 0;
-  const tierLabel = `${capitalize(solo.tier)} ${solo.rank}`;
-  const tierImage = `/assets/ranked/${solo.tier.toLowerCase()}.png`;
-
-  container.innerHTML = `
-    <div class="rank-main">
-      <span
-        class="tier-emblem-image"
-        role="img"
-        aria-label="${escapeHtml(tierLabel)} 엠블럼"
-        style="background-image:url('${tierImage}')"
-      ></span>
-      <div>
-        <strong class="rank-name">${escapeHtml(tierLabel)}</strong>
-        <span class="rank-lp">${number(solo.leaguePoints)} LP</span>
-      </div>
-    </div>
-    <div class="rank-record">
-      <span><strong>${number(solo.wins)}승</strong> ${number(solo.losses)}패</span>
-      <span>승률 <strong>${winRate}%</strong></span>
-    </div>
-  `;
-}
-
-function renderMasteries(data) {
-  const container = document.querySelector("#mastery-content");
-  const masteries = data.masteries || [];
-
-  if (!masteries.length) {
-    container.innerHTML = '<p class="unranked">챔피언 숙련도 기록이 없습니다.</p>';
-    return;
-  }
-
-  container.innerHTML = masteries.map((mastery, index) => {
-    const champion = data.staticData?.champions?.[mastery.championId];
-    if (!champion) return "";
+    const total = entry.wins + entry.losses;
+    const winRate = total ? Math.round((entry.wins / total) * 100) : 0;
+    const tierLabel = `${capitalize(entry.tier)} ${entry.rank}`;
+    const tierImage = `/assets/ranked/${entry.tier.toLowerCase()}.png`;
 
     return `
-      <div class="mastery-row">
-        <span class="mastery-rank">${index + 1}</span>
-        <img src="${championImage(data.ddragonVersion, champion.id)}" width="42" height="42" alt="${escapeHtml(champion.name)}">
-        <div class="mastery-info">
-          <strong>${escapeHtml(champion.name)}</strong>
-          <span>${number(mastery.championPoints)}점</span>
+      <article class="profile-rank-card">
+        <span class="profile-rank-label">${label}</span>
+        <div class="profile-rank-main">
+          <span
+            class="profile-tier-emblem"
+            role="img"
+            aria-label="${escapeHtml(tierLabel)} 엠블럼"
+            style="background-image:url('${tierImage}')"
+          ></span>
+          <div>
+            <strong>${escapeHtml(tierLabel)}</strong>
+            <small>${number(entry.leaguePoints)} LP</small>
+            <p>${number(entry.wins)}승 ${number(entry.losses)}패 · 승률 ${winRate}%</p>
+          </div>
         </div>
-        <strong class="mastery-level">M${mastery.championLevel}</strong>
-      </div>
+      </article>
     `;
   }).join("");
 }
 
-function renderSummary(data) {
-  const participants = data.matches
-    .map((match) => getCurrentParticipant(match, data.account))
-    .filter(Boolean);
+function renderMasteries(data) {
+  const container = document.querySelector("#profile-mastery-list");
+  const masteries = (data.masteries || []).slice(0, 3);
 
-  const games = participants.length;
-  const wins = participants.filter((participant) => participant.win).length;
-  const kills = sum(participants, "kills");
-  const deaths = sum(participants, "deaths");
-  const assists = sum(participants, "assists");
-  const winRate = games ? Math.round((wins / games) * 100) : 0;
-  const kda = deaths ? ((kills + assists) / deaths).toFixed(2) : (kills + assists).toFixed(2);
+  if (!masteries.length) {
+    container.innerHTML = '<p class="profile-mastery-empty">숙련도 기록 없음</p>';
+    return;
+  }
 
-  document.querySelector("#summary-content").innerHTML = `
-    <div class="summary-chart">
-      <div class="win-ring" style="--rate:${winRate}">
-        <strong>${winRate}%</strong>
+  container.innerHTML = masteries.map((mastery) => {
+    const champion = data.staticData?.champions?.[mastery.championId];
+    if (!champion) return "";
+
+    return `
+      <div class="profile-mastery-item">
+        <img src="${championImage(data.ddragonVersion, champion.id)}" width="38" height="38" alt="${escapeHtml(champion.name)}">
+        <div>
+          <strong>${escapeHtml(champion.name)}</strong>
+          <span>${number(mastery.championPoints)}점</span>
+        </div>
       </div>
-      <div class="summary-kda">
-        <strong>${kda} KDA</strong>
-        <span>${average(kills, games)} / ${average(deaths, games)} / ${average(assists, games)}</span>
-      </div>
-    </div>
-    <div class="summary-stats">
-      <div><strong>${games}</strong><span>게임</span></div>
-      <div><strong>${wins}</strong><span>승리</span></div>
-      <div><strong>${games - wins}</strong><span>패배</span></div>
-    </div>
-  `;
+    `;
+  }).join("");
 }
 
 function renderMatches(data) {
@@ -1265,16 +1641,16 @@ function normalizeName(value) {
 
 function getQueueType(queueId) {
   const queues = {
-    400: { label: "일반 선택", category: "normal" },
     420: { label: "솔로 랭크", category: "ranked" },
     430: { label: "일반 교차", category: "normal" },
     440: { label: "자유 랭크", category: "ranked" },
-    450: { label: "무작위 총력전", category: "normal" },
+    450: { label: "무작위 총력전", category: "aram" },
     490: { label: "빠른 대전", category: "normal" },
-    900: { label: "URF", category: "normal" },
-    1700: { label: "아레나", category: "normal" }
+    400: { label: "일반 선택", category: "other" },
+    900: { label: "URF", category: "other" },
+    1700: { label: "아레나", category: "other" }
   };
-  return queues[queueId] || { label: "기타 모드", category: "normal" };
+  return queues[queueId] || { label: "기타 모드", category: "other" };
 }
 
 function saveRecentSearch(riotId) {
@@ -1422,6 +1798,66 @@ function capitalize(value) {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+function createDemoTftData(lolData) {
+  const traits = ["별 수호자", "전략가", "기원자", "난동꾼", "결투가", "요새"];
+  const units = ["아리", "럭스", "세라핀", "가렌", "이즈리얼", "리 신", "소나", "징크스"];
+  const augments = ["판도라의 아이템", "보석 연꽃", "전투 마법사", "회복의 구", "단결된 의지"];
+  const tftMatches = Array.from({ length: 10 }, (_, index) => ({
+    matchId: `TFT_DEMO_${index + 1}`,
+    gameDatetime: Date.now() - (index + 1) * 4 * 60 * 60 * 1000,
+    gameLength: 1920 + index * 35,
+    queueId: index % 4 === 0 ? 1090 : 1100,
+    gameType: "standard",
+    setNumber: 15,
+    placement: [2, 5, 1, 4, 7, 3, 6, 2, 8, 4][index],
+    level: [9, 8, 9, 8, 7, 9, 8, 9, 7, 8][index],
+    lastRound: [36, 31, 38, 34, 27, 35, 30, 37, 25, 33][index],
+    timeEliminated: 1780 + index * 28,
+    traits: [
+      { name: traits[index % traits.length], units: 6, style: 3, tier: 2 },
+      { name: traits[(index + 2) % traits.length], units: 3, style: 1, tier: 1 }
+    ],
+    units: Array.from({ length: 7 }, (_, unitIndex) => ({
+      name: units[(index + unitIndex) % units.length],
+      tier: unitIndex < 2 ? 2 : 1,
+      rarity: unitIndex % 5,
+      items: []
+    })),
+    augments: Array.from({ length: 3 }, (_, augmentIndex) =>
+      augments[(index + augmentIndex) % augments.length]
+    )
+  }));
+  const placements = tftMatches.map((match) => match.placement);
+
+  return {
+    account: lolData.account,
+    tftSummoner: {
+      level: lolData.summoner.level,
+      profileIconId: lolData.summoner.profileIconId
+    },
+    tftRank: {
+      queueType: "RANKED_TFT",
+      tier: "DIAMOND",
+      rank: "IV",
+      leaguePoints: 42,
+      wins: 18,
+      losses: 12,
+      winRate: 60
+    },
+    tftMatches,
+    tftSummary: {
+      games: tftMatches.length,
+      averagePlacement: placements.reduce((total, placement) => total + placement, 0) / placements.length,
+      topFourRate: Math.round((placements.filter((placement) => placement <= 4).length / placements.length) * 100),
+      firstPlaces: placements.filter((placement) => placement === 1).length,
+      averageLevel: tftMatches.reduce((total, match) => total + match.level, 0) / tftMatches.length,
+      mostTrait: "별 수호자",
+      mostUnit: "아리"
+    },
+    updatedAt: new Date().toISOString()
+  };
+}
+
 function createDemoData() {
   const version = "16.11.1";
   const puuid = "demo-player-puuid";
@@ -1503,7 +1939,7 @@ function createDemoData() {
     return {
       metadata: { matchId: `DEMO_${index + 1}` },
       info: {
-        queueId: 420,
+        queueId: [420, 440, 430, 490, 450][index % 5],
         gameCreation: Date.now() - (index + 1) * 3 * 60 * 60 * 1000,
         gameStartTimestamp: Date.now() - (index + 1) * 3 * 60 * 60 * 1000,
         gameDuration: 1540 + index * 42,
@@ -1516,14 +1952,24 @@ function createDemoData() {
     isDemo: true,
     account: { gameName: "Rift Record Demo", tagLine: "DEMO", puuid },
     summoner: { level: 248, profileIconId: 29 },
-    ranked: [{
-      queueType: "RANKED_SOLO_5x5",
-      tier: "EMERALD",
-      rank: "II",
-      leaguePoints: 62,
-      wins: 84,
-      losses: 69
-    }],
+    ranked: [
+      {
+        queueType: "RANKED_SOLO_5x5",
+        tier: "EMERALD",
+        rank: "II",
+        leaguePoints: 62,
+        wins: 84,
+        losses: 69
+      },
+      {
+        queueType: "RANKED_FLEX_SR",
+        tier: "PLATINUM",
+        rank: "I",
+        leaguePoints: 28,
+        wins: 31,
+        losses: 25
+      }
+    ],
     masteries: champions.map((champion, index) => ({
       championId: champion.key,
       championLevel: 7,

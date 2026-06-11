@@ -11,13 +11,16 @@ import {
 import { getSupabaseStatus, hasSupabaseConfig } from "./supabase-server.mjs";
 
 const API_KEY = process.env.RIOT_API_KEY;
+const TFT_API_KEY = process.env.TFT_API_KEY;
 const PLATFORM = "kr";
 const REGION = "asia";
 
 let ddragonCache = { version: "16.9.1", expiresAt: 0 };
 let staticDataCache = { value: null, expiresAt: 0 };
+const tftStaticDataCache = new Map();
 let riotRequestQueue = Promise.resolve();
 const responseCache = new Map();
+const tftResponseCache = new Map();
 
 export async function handleApiRequest({ method, pathname, searchParams }) {
   try {
@@ -25,6 +28,7 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
       return ok({
         status: "ok",
         hasRiotApiKey: Boolean(API_KEY),
+        hasTftApiKey: Boolean(TFT_API_KEY),
         ...getSupabaseStatus(),
         timestamp: new Date().toISOString()
       });
@@ -93,6 +97,10 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
       return ok(await getSummonerProfile(gameName, tagLine));
     }
 
+    if (pathname === "/api/tft") {
+      return await handleTftRequest(searchParams);
+    }
+
     return fail(404, "API 경로를 찾을 수 없습니다.");
   } catch (error) {
     const status = error.status || 500;
@@ -104,6 +112,8 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
         ? "매치 데이터 저장 중 문제가 발생했습니다."
         : status === 404
           ? "플레이어를 찾을 수 없습니다. Riot ID와 태그를 확인해 주세요."
+          : status === 403 && String(error.endpoint || "").includes(":/tft/")
+            ? "Riot API 키에 TFT API 접근 권한이 없거나 키가 만료되었습니다."
           : status === 401 || status === 403
             ? "API 키가 만료되었거나 유효하지 않습니다. 새 개발 키로 교체해 주세요."
             : status === 429
@@ -228,6 +238,487 @@ async function getSummonerProfile(gameName, tagLine) {
   });
 
   return payload;
+}
+
+async function handleTftRequest(searchParams) {
+  if (!TFT_API_KEY) {
+    return {
+      status: 503,
+      body: {
+        error: "TFT API Key가 설정되어 있지 않습니다.",
+        debug: {
+          hasTftApiKey: false
+        }
+      }
+    };
+  }
+
+  const gameName = searchParams.get("gameName")?.trim();
+  const tagLine = searchParams.get("tagLine")?.trim();
+  const receivedPuuid = searchParams.get("puuid")?.trim() || null;
+
+  if (!gameName || !tagLine) {
+    return fail(400, "계정 정보를 찾을 수 없습니다.");
+  }
+
+  try {
+    const account = await tftRiotFetch(
+      "tft-account",
+      "asia.api.riotgames.com",
+      `/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`
+    );
+    return ok(await getTftProfile({
+      gameName,
+      tagLine,
+      receivedPuuid,
+      resolvedAccountPuuid: account.puuid
+    }));
+  } catch (error) {
+    const debug = {
+      step: error.tftStep || "unknown",
+      receivedPuuid,
+      resolvedAccountPuuid: error.resolvedAccountPuuid || null,
+      gameName,
+      tagLine,
+      status: error.status || 500,
+      url: error.tftUrl || null,
+      riotMessage: error.riotMessage || error.message || "Unknown TFT API error"
+    };
+    console.error("[handleTftRequest] failed", debug);
+    const decryptFailure = error.tftStep === "tft-match-ids" &&
+      error.status === 400 &&
+      /decrypt/i.test(String(error.riotMessage || ""));
+    return {
+      status: error.status || 500,
+      body: {
+        error: decryptFailure
+          ? "이 Riot ID의 TFT 전적을 조회할 수 없습니다. Riot ID 또는 태그를 다시 확인해주세요."
+          : "롤토체스 최근 전적을 불러오는 중 문제가 발생했습니다.",
+        debug
+      }
+    };
+  }
+}
+
+async function getTftProfile({
+  gameName,
+  tagLine,
+  receivedPuuid,
+  resolvedAccountPuuid
+}) {
+  const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
+  const cached = tftResponseCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  let matchIds;
+  try {
+    matchIds = await tftRiotFetch(
+      "tft-match-ids",
+      "asia.api.riotgames.com",
+      `/tft/match/v1/matches/by-puuid/${encodeURIComponent(resolvedAccountPuuid)}/ids?count=10`
+    );
+  } catch (error) {
+    error.resolvedAccountPuuid = resolvedAccountPuuid;
+    throw error;
+  }
+  const rawMatches = await mapLimit(matchIds, 2, (matchId) =>
+    tftRiotFetch(
+      "tft-match-detail",
+      "asia.api.riotgames.com",
+      `/tft/match/v1/matches/${encodeURIComponent(matchId)}`
+    )
+  );
+  const tftStaticData = await getTftStaticData(rawMatches);
+
+  const summonerResult = await tftOptionalFetch(
+    "tft-summoner",
+    "kr.api.riotgames.com",
+    `/tft/summoner/v1/summoners/by-puuid/${encodeURIComponent(resolvedAccountPuuid)}`
+  );
+  const tftSummoner = summonerResult.data;
+  const summonerId = tftSummoner?.id;
+  const leagueResult = summonerResult.data
+    ? await tftOptionalFetch(
+      "tft-league",
+      "kr.api.riotgames.com",
+      summonerId
+        ? `/tft/league/v1/entries/by-summoner/${encodeURIComponent(summonerId)}`
+        : `/tft/league/v1/by-puuid/${encodeURIComponent(resolvedAccountPuuid)}`
+    )
+    : { data: null, status: null, debug: summonerResult.debug };
+  const rankEntries = Array.isArray(leagueResult.data)
+    ? leagueResult.data
+    : leagueResult.data ? [leagueResult.data] : [];
+  const tftMatches = rawMatches
+    .map((match) => compactTftMatch(match, resolvedAccountPuuid, tftStaticData))
+    .filter(Boolean);
+  const tftRank = selectTftRank(rankEntries);
+  const rankRequestFailed = Boolean(summonerResult.debug || leagueResult.debug);
+  const rankDebug = {
+    tftSummonerStatus: summonerResult.status,
+    tftSummonerIdExists: Boolean(summonerId),
+    tftLeagueStatus: leagueResult.status,
+    tftLeagueLookup: summonerId ? "by-summoner-id" : "by-puuid",
+    tftLeagueEntriesCount: rankEntries.length,
+    tftLeagueQueueTypes: rankEntries.map((entry) => entry.queueType).filter(Boolean),
+    selectedTftRank: tftRank,
+    ...(summonerResult.debug || leagueResult.debug
+      ? {
+        rankError: {
+          ...(summonerResult.debug || leagueResult.debug),
+          tftSummonerIdExists: Boolean(summonerId)
+        }
+      }
+      : {})
+  };
+  const payload = {
+    tftSummoner: tftSummoner
+      ? {
+        id: summonerId,
+        level: tftSummoner.summonerLevel,
+        profileIconId: tftSummoner.profileIconId
+      }
+      : null,
+    tftRank,
+    tftRankError: tftRank
+      ? null
+      : rankRequestFailed
+        ? "롤토체스 랭크를 불러오지 못했습니다."
+        : "롤토체스 랭크 정보 없음",
+    tftMatches,
+    tftSummary: summarizeTftMatches(tftMatches),
+    tftStaticData: compactTftStaticData(tftStaticData, tftMatches),
+    account: {
+      gameName,
+      tagLine,
+      puuid: resolvedAccountPuuid
+    },
+    debug: {
+      step: "complete",
+      receivedPuuid,
+      resolvedAccountPuuid,
+      gameName,
+      tagLine,
+      ...rankDebug
+    },
+    updatedAt: new Date().toISOString()
+  };
+
+  tftResponseCache.set(cacheKey, {
+    value: payload,
+    expiresAt: Date.now() + 2 * 60 * 1000
+  });
+  return payload;
+}
+
+async function tftRiotFetch(step, host, path, attempt = 0) {
+  const url = `https://${host}${path}`;
+  let response;
+
+  try {
+    response = await scheduleRiotRequest(() =>
+      fetch(url, {
+        headers: {
+          "X-Riot-Token": TFT_API_KEY
+        }
+      })
+    );
+  } catch (cause) {
+    const error = new Error("TFT API network request failed");
+    error.status = 502;
+    error.tftStep = step;
+    error.tftUrl = url;
+    error.riotMessage = cause?.message;
+    throw error;
+  }
+
+  if (response.status === 429 && attempt < 3) {
+    const retryAfter = Number(response.headers.get("retry-after") || 1);
+    await delay(Math.max(1000, retryAfter * 1000));
+    return tftRiotFetch(step, host, path, attempt + 1);
+  }
+
+  if (!response.ok) {
+    let riotBody;
+    try {
+      riotBody = await response.json();
+    } catch {
+      riotBody = await response.text().catch(() => "");
+    }
+
+    const error = new Error(`TFT API request failed (${response.status})`);
+    error.status = response.status;
+    error.tftStep = step;
+    error.tftUrl = url;
+    error.riotMessage = riotBody?.status?.message || riotBody || response.statusText;
+    throw error;
+  }
+
+  return response.json();
+}
+
+async function tftOptionalFetch(step, host, path) {
+  try {
+    return {
+      data: await tftRiotFetch(step, host, path),
+      status: 200,
+      debug: null
+    };
+  } catch (error) {
+    const debug = {
+      step: error.tftStep || step,
+      status: error.status || 500,
+      url: error.tftUrl || `https://${host}${path}`,
+      riotMessage: error.riotMessage || error.message || "Unknown TFT API error"
+    };
+    console.warn(`[${step}] optional TFT request failed`, debug);
+    return { data: null, status: debug.status, debug };
+  }
+}
+
+function selectTftRank(entries) {
+  const ranks = Array.isArray(entries) ? entries : entries ? [entries] : [];
+  const ranked = ranks.find((entry) => entry.queueType === "RANKED_TFT");
+
+  if (!ranked) return null;
+
+  const wins = Number(ranked.wins || 0);
+  const losses = Number(ranked.losses || 0);
+  const total = wins + losses;
+  return {
+    queueType: ranked.queueType,
+    tier: ranked.tier,
+    rank: ranked.rank,
+    leaguePoints: Number(ranked.leaguePoints || 0),
+    wins,
+    losses,
+    winRate: total ? Math.round((wins / total) * 100) : 0
+  };
+}
+
+function compactTftMatch(match, puuid, staticData) {
+  const participant = match?.info?.participants?.find((entry) => entry.puuid === puuid);
+  if (!participant) return null;
+
+  return {
+    matchId: match.metadata?.match_id || match.metadata?.matchId,
+    gameDatetime: Number(match.info?.game_datetime || 0),
+    gameLength: Number(match.info?.game_length || 0),
+    queueId: Number(match.info?.queue_id || 0),
+    gameType: match.info?.tft_game_type || "",
+    gameVersion: match.info?.game_version || "",
+    setNumber: match.info?.tft_set_number,
+    placement: Number(participant.placement || 0),
+    level: Number(participant.level || 0),
+    lastRound: Number(participant.last_round || 0),
+    timeEliminated: Number(participant.time_eliminated || 0),
+    traits: (participant.traits || [])
+      .filter((trait) => Number(trait.num_units || 0) > 0)
+      .sort((a, b) =>
+        Number(b.style || 0) - Number(a.style || 0) ||
+        Number(b.num_units || 0) - Number(a.num_units || 0)
+      )
+      .slice(0, 6)
+      .map((trait) => ({
+        id: trait.name,
+        name: getTftStaticName(staticData.traits, trait.name),
+        units: Number(trait.num_units || 0),
+        style: Number(trait.style || 0),
+        tier: Number(trait.tier_current || 0)
+      })),
+    units: (participant.units || [])
+      .sort((a, b) => Number(b.tier || 0) - Number(a.tier || 0))
+      .map((unit) => ({
+        id: unit.character_id,
+        name: getTftStaticName(staticData.units, unit.character_id),
+        tier: Number(unit.tier || 1),
+        rarity: Number(unit.rarity || 0),
+        items: (unit.itemNames || []).map((itemId) => ({
+          id: itemId,
+          name: getTftStaticName(staticData.items, itemId)
+        }))
+      })),
+    augments: (participant.augments || []).map((augmentId) => ({
+      id: augmentId,
+      name: getTftStaticName(staticData.augments, augmentId)
+    }))
+  };
+}
+
+function summarizeTftMatches(matches) {
+  const count = matches.length;
+  const traitCounts = new Map();
+  const unitCounts = new Map();
+
+  for (const match of matches) {
+    for (const trait of match.traits) {
+      traitCounts.set(trait.name, (traitCounts.get(trait.name) || 0) + 1);
+    }
+    for (const unit of match.units) {
+      unitCounts.set(unit.name, (unitCounts.get(unit.name) || 0) + 1);
+    }
+  }
+
+  const topFourRate = count
+    ? Math.round((matches.filter((match) => match.placement <= 4).length / count) * 100)
+    : 0;
+  const firstPlaces = matches.filter((match) => match.placement === 1).length;
+
+  return {
+    games: count,
+    averagePlacement: count
+      ? round(matches.reduce((total, match) => total + match.placement, 0) / count, 1)
+      : 0,
+    topFourRate,
+    top4Rate: topFourRate,
+    firstPlaces,
+    firstPlaceCount: firstPlaces,
+    averageLevel: count
+      ? round(matches.reduce((total, match) => total + match.level, 0) / count, 1)
+      : 0,
+    mostTrait: mostFrequentTftName(traitCounts),
+    mostUnit: mostFrequentTftName(unitCounts)
+  };
+}
+
+function mostFrequentTftName(counts) {
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || "-";
+}
+
+function cleanTftName(value) {
+  return String(value || "")
+    .replace(/^TFT\d+_Augment_/, "")
+    .replace(/^TFT\d+_/, "")
+    .replace(/^TFT_/, "")
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim() || "-";
+}
+
+async function getTftStaticData(matches) {
+  const latestVersion = await getDdragonVersion();
+  const versions = new Set([latestVersion]);
+
+  for (const match of matches) {
+    const version = tftDdragonVersion(match?.info?.game_version);
+    if (version) versions.add(version);
+  }
+
+  const payloads = await Promise.all(
+    [...versions].map((version) => getTftStaticDataVersion(version))
+  );
+  return payloads.reduce(mergeTftStaticData, emptyTftStaticData());
+}
+
+async function getTftStaticDataVersion(version) {
+  const cached = tftStaticDataCache.get(version);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const base = `https://ddragon.leagueoflegends.com/cdn/${version}/data/ko_KR`;
+  const files = {
+    units: "tft-champion.json",
+    traits: "tft-trait.json",
+    augments: "tft-augments.json",
+    items: "tft-item.json"
+  };
+  const entries = await Promise.all(
+    Object.entries(files).map(async ([type, filename]) => {
+      try {
+        const response = await fetch(`${base}/${filename}`);
+        if (!response.ok) return [type, {}];
+        const payload = await response.json();
+        return [type, createTftAssetMap(payload.data, version)];
+      } catch {
+        return [type, {}];
+      }
+    })
+  );
+  const value = Object.fromEntries(entries);
+
+  tftStaticDataCache.set(version, {
+    value,
+    expiresAt: Date.now() + 6 * 60 * 60 * 1000
+  });
+  return value;
+}
+
+function createTftAssetMap(data, version) {
+  const assets = {};
+  for (const [key, entry] of Object.entries(data || {})) {
+    const id = entry?.id || key;
+    const name = entry?.name;
+    if (!name) continue;
+    const image = entry?.image;
+    const asset = {
+      name,
+      imageUrl: image?.group && image?.full
+        ? `https://ddragon.leagueoflegends.com/cdn/${version}/img/${image.group}/${image.full}`
+        : null
+    };
+    assets[key] = asset;
+    assets[id] = asset;
+  }
+  return assets;
+}
+
+function tftDdragonVersion(gameVersion) {
+  const match = String(gameVersion || "").match(/(\d+)\.(\d+)/);
+  return match ? `${match[1]}.${match[2]}.1` : null;
+}
+
+function emptyTftStaticData() {
+  return { units: {}, traits: {}, augments: {}, items: {} };
+}
+
+function mergeTftStaticData(target, source) {
+  for (const type of Object.keys(target)) {
+    Object.assign(target[type], source[type] || {});
+  }
+  return target;
+}
+
+function getTftStaticEntry(assets, id) {
+  return assets?.[id] || {
+    name: cleanTftName(id),
+    imageUrl: null
+  };
+}
+
+function getTftStaticName(assets, id) {
+  return getTftStaticEntry(assets, id).name;
+}
+
+function compactTftStaticData(staticData, matches) {
+  const ids = {
+    units: new Set(),
+    traits: new Set(),
+    augments: new Set(),
+    items: new Set()
+  };
+
+  for (const match of matches) {
+    for (const trait of match.traits) ids.traits.add(trait.id);
+    for (const unit of match.units) {
+      ids.units.add(unit.id);
+      for (const item of unit.items) ids.items.add(item.id);
+    }
+    for (const augment of match.augments) ids.augments.add(augment.id);
+  }
+
+  return Object.fromEntries(
+    Object.entries(ids).map(([type, values]) => [
+      type,
+      Object.fromEntries(
+        [...values].map((id) => [
+          String(id).toLowerCase(),
+          getTftStaticEntry(staticData[type], id)
+        ])
+      )
+    ])
+  );
 }
 
 function compactMatch(match) {
@@ -664,6 +1155,15 @@ async function riotFetch(route, path, attempt = 0) {
   return response.json();
 }
 
+async function riotFetchOptional(route, path, ignoredStatuses = [404]) {
+  try {
+    return await riotFetch(route, path);
+  } catch (error) {
+    if (ignoredStatuses.includes(error.status)) return null;
+    throw error;
+  }
+}
+
 function scheduleRiotRequest(task) {
   const run = riotRequestQueue.then(async () => {
     const result = await task();
@@ -862,7 +1362,8 @@ function sanitizeObject(value) {
     "x-riot-token",
     "X-Riot-Token",
     "SUPABASE_SERVICE_ROLE_KEY",
-    "RIOT_API_KEY"
+    "RIOT_API_KEY",
+    "TFT_API_KEY"
   ]);
 
   const result = {};

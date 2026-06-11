@@ -911,12 +911,887 @@ img {
   background: var(--ink);
 }
 
-.analysis-dashboard {
+.game-tabs {
+  min-height: 56px;
+  padding: 0 max(24px, calc((100% - 1180px) / 2));
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  background: #090b0d;
+  border-bottom: 1px solid #303438;
+}
+
+.game-tabs button {
+  min-width: 145px;
+  padding: 18px 20px 15px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: #8f969b;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.game-tabs button.active {
+  border-bottom-color: var(--lime);
+  color: var(--white);
+}
+
+.tft-results {
+  min-height: 520px;
+}
+
+.tft-state {
+  width: min(1180px, calc(100% - 48px));
+  min-height: 360px;
+  margin: 0 auto;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.tft-state strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.tft-error p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.tft-error button {
+  padding: 10px 18px;
+  border: 0;
+  color: var(--white);
+  background: var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.tft-profile {
+  min-height: 210px;
+  padding: 28px max(24px, calc((100% - 1180px) / 2));
+  display: grid;
+  grid-template-columns: 1fr minmax(300px, 0.65fr);
+  gap: 36px;
+  align-items: center;
+  color: var(--white);
+  background: var(--ink);
+}
+
+.tft-profile-identity {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.tft-profile-icon {
+  width: 96px;
+  height: 96px;
+  position: relative;
+  flex: 0 0 96px;
+  border: 3px solid #8ee7ff;
+}
+
+.tft-profile-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tft-profile-icon span {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  min-width: 36px;
+  padding: 5px 7px;
+  border: 3px solid var(--ink);
+  color: var(--ink);
+  background: #8ee7ff;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.tft-profile-identity small {
+  color: #8ee7ff;
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.tft-profile-identity h2 {
+  margin: 8px 0 10px;
+  font-size: 30px;
+}
+
+.tft-profile-identity h2 b {
+  margin-left: 7px;
+  color: #858c92;
+  font-size: 16px;
+}
+
+#tft-updated-at {
+  color: #8f969b;
+  font-size: 10px;
+}
+
+.tft-rank {
+  min-height: 132px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #373c40;
+  background: #1a1d20;
+}
+
+.tft-rank > span {
+  margin-bottom: 14px;
+  color: #969da3;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.tft-rank > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.tft-rank .tft-rank-main {
+  align-items: center;
+  gap: 16px;
+}
+
+.tft-rank-emblem {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.tft-rank-main > div {
+  min-width: 0;
+}
+
+.tft-rank-main > div strong,
+.tft-rank-main > div b,
+.tft-rank-main > div p {
+  display: block;
+}
+
+.tft-rank strong {
+  font-size: 20px;
+}
+
+.tft-rank b {
+  color: #8ee7ff;
+  font-size: 12px;
+}
+
+.tft-rank p,
+.tft-rank-main p {
+  margin: 10px 0 0;
+  color: #969da3;
+  font-size: 10px;
+}
+
+.tft-content-inner {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 42px 0 8px;
+  padding: 38px 0 80px;
+  display: grid;
+  gap: 42px;
+}
+
+.tft-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: var(--white);
+}
+
+.tft-summary article {
+  min-width: 0;
+  min-height: 96px;
+  padding: 17px 14px;
+  border-right: 1px solid var(--line);
+}
+
+.tft-summary article:last-child {
+  border-right: 0;
+}
+
+.tft-summary span,
+.tft-summary strong {
+  display: block;
+}
+
+.tft-summary span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.tft-summary strong {
+  margin-top: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.tft-match-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tft-match-card {
+  --placement-color: #737b83;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 62px 120px minmax(230px, 0.8fr) minmax(0, 1.45fr);
+  gap: 16px 20px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--placement-color);
+  background: var(--white);
+}
+
+.tft-match-card.first {
+  --placement-color: #d49b26;
+}
+
+.tft-match-card.top-four {
+  --placement-color: var(--blue);
+}
+
+.tft-match-card.bottom-four {
+  --placement-color: #737b83;
+}
+
+.tft-placement {
+  text-align: center;
+}
+
+.tft-placement strong {
+  color: var(--placement-color);
+  font-size: 32px;
+  font-weight: 950;
+}
+
+.tft-placement span {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tft-match-meta strong,
+.tft-match-meta span {
+  display: block;
+}
+
+.tft-match-meta strong {
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+
+.tft-match-meta span {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.tft-match-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.tft-match-stats div {
+  padding: 4px 12px;
+  border-left: 1px solid var(--line);
+}
+
+.tft-match-stats strong,
+.tft-match-stats span {
+  display: block;
+}
+
+.tft-match-stats strong {
+  font-size: 11px;
+}
+
+.tft-match-stats span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.tft-card-section {
+  min-width: 0;
+}
+
+.tft-card-section > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.tft-traits,
+.tft-units,
+.tft-augments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tft-trait,
+.tft-augments > span,
+.tft-empty-chip {
+  padding: 6px 8px;
+  color: #4d565e;
+  background: #eef0f1;
+  font-size: 9px;
+}
+
+.tft-trait.tier-2 {
+  color: #476b20;
+  background: #edf7df;
+}
+
+.tft-trait.tier-3,
+.tft-trait.tier-4 {
+  color: #765313;
+  background: #fff2ce;
+}
+
+.tft-trait b {
+  margin-left: 3px;
+}
+
+.tft-unit {
+  min-width: 68px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  background: #fafaf9;
+}
+
+.tft-unit strong,
+.tft-unit small,
+.tft-unit em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tft-unit strong {
+  font-size: 9px;
+}
+
+.tft-unit small {
+  margin-top: 4px;
+  color: var(--gold);
+  font-size: 7px;
+}
+
+.tft-unit em {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 7px;
+  font-style: normal;
+}
+
+.tft-match-card .tft-card-section:nth-of-type(4) {
+  grid-column: 4;
+}
+
+.tft-match-card .tft-card-section:nth-of-type(5),
+.tft-match-card .tft-card-section:nth-of-type(6) {
+  grid-column: span 2;
+}
+
+/* TFT compact match history */
+.tft-summary.tft-summary {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  gap: 16px;
+  border: 1px solid #dfe3e5;
+  background: #f5f7f7;
+}
+
+.tft-summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid #e1e4e5;
+  background: var(--white);
+}
+
+.tft-summary .tft-summary-metrics article {
+  min-height: 76px;
+  padding: 13px 14px;
+  border-right: 1px solid #e7e9ea;
+  border-bottom: 1px solid #e7e9ea;
+}
+
+.tft-summary .tft-summary-metrics article:nth-child(4n) {
+  border-right: 0;
+}
+
+.tft-summary .tft-summary-metrics article:nth-last-child(-n + 4) {
+  border-bottom: 0;
+}
+
+.tft-summary .tft-summary-metrics strong {
+  margin-top: 12px;
+  font-size: 15px;
+}
+
+.tft-placement-trend {
+  min-width: 0;
+  padding: 14px 16px 10px;
+  border: 1px solid #e1e4e5;
+  background: var(--white);
+}
+
+.tft-placement-trend > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tft-placement-trend > div span {
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.tft-placement-trend > div strong {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.tft-placement-chart {
+  width: 100%;
+  height: 106px;
+  margin-top: 4px;
+  overflow: visible;
+}
+
+.tft-placement-chart line {
+  stroke: #e7eaeb;
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.tft-placement-chart .top-four-line {
+  stroke: #b8dce7;
+}
+
+.tft-placement-chart polyline {
+  fill: none;
+  stroke: #19a6c5;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tft-placement-chart circle {
+  fill: #fff;
+  stroke: #19a6c5;
+  stroke-width: 2.5;
+}
+
+.tft-placement-chart text {
+  fill: #697279;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.tft-match-list {
+  gap: 8px;
+}
+
+.tft-match-card.tft-match-card-compact {
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  border-left-width: 5px;
+  border-radius: 2px;
+  box-shadow: 0 4px 16px rgb(18 25 30 / 4%);
+}
+
+.tft-compact-main {
+  min-height: 128px;
+  display: grid;
+  grid-template-columns: 74px 126px minmax(0, 1fr) 70px;
+  align-items: stretch;
+}
+
+.tft-match-card-compact .tft-placement {
+  padding: 20px 8px 14px;
+  display: flex;
+  align-items: baseline;
+  align-content: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--placement-color) 8%, white);
+}
+
+.tft-match-card-compact .tft-placement strong {
+  font-size: 38px;
+  line-height: 0.95;
+}
+
+.tft-match-card-compact .tft-placement b {
+  width: 100%;
+  margin-top: 8px;
+  color: var(--placement-color);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.tft-match-card-compact .tft-match-meta {
+  padding: 18px 14px;
+  border-right: 1px solid #eceeef;
+}
+
+.tft-match-card-compact .tft-match-meta strong {
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.tft-match-card-compact .tft-match-meta div {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tft-match-card-compact .tft-match-meta div b {
+  padding: 3px 5px;
+  color: #4f5b62;
+  background: #eef1f2;
+  font-size: 7px;
+}
+
+.tft-build-overview {
+  min-width: 0;
+  padding: 12px 14px 10px;
+  display: grid;
+  gap: 9px;
+}
+
+.tft-build-topline {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.72fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.tft-match-card-compact .tft-traits,
+.tft-match-card-compact .tft-augments {
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.tft-match-card-compact .tft-trait,
+.tft-augment {
+  min-width: 0;
+  height: 25px;
+  padding: 4px 7px 4px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e2e5e6;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.tft-match-card-compact .tft-trait > span:not(.tft-trait-icon),
+.tft-augment > span:not(.tft-augment-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tft-trait-icon,
+.tft-augment-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+
+.tft-augment {
+  padding-right: 6px;
+  color: #555e65;
+  background: #f4f1fa;
+  font-size: 8px;
+}
+
+.tft-match-card-compact .tft-units {
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.tft-unit-portrait {
+  width: 50px;
+  flex: 0 0 50px;
+}
+
+.tft-unit-image {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: block;
+  overflow: hidden;
+  border: 2px solid #7e858b;
+  background: #242a2e;
+}
+
+.tft-unit-portrait.rarity-2 .tft-unit-image {
+  border-color: #2fa66f;
+}
+
+.tft-unit-portrait.rarity-3 .tft-unit-image {
+  border-color: #3d84d8;
+}
+
+.tft-unit-portrait.rarity-4 .tft-unit-image {
+  border-color: #9c55cc;
+}
+
+.tft-unit-portrait.rarity-5 .tft-unit-image {
+  border-color: #db9a25;
+}
+
+.tft-unit-icon,
+.tft-detailed-unit-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.tft-unit-image > b {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  color: #ffd76a;
+  font-size: 7px;
+  line-height: 1;
+  text-shadow: 0 1px 2px #000;
+}
+
+.tft-item-icons {
+  min-height: 14px;
+  margin-top: 3px;
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+}
+
+.tft-item-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: cover;
+  border: 1px solid #b9c0c4;
+  background: #252a2e;
+}
+
+.tft-asset-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f5f7f7;
+  background: #596168;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.tft-card-actions {
+  padding: 15px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  border-left: 1px solid #eceeef;
+  background: #fafbfb;
+}
+
+.tft-card-actions > span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.tft-details-button {
+  width: 48px;
+  min-height: 31px;
+  border: 1px solid #cfd5d8;
+  color: #3e4a50;
+  background: #fff;
+  font-size: 8px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.tft-details-button b {
+  margin-left: 3px;
+  display: inline-block;
+  transition: transform 160ms ease;
+}
+
+.tft-match-card.is-expanded .tft-details-button b {
+  transform: rotate(180deg);
+}
+
+.tft-match-details {
+  max-height: 0;
+  padding: 0 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 0.55fr) minmax(180px, 0.55fr);
+  gap: 16px;
+  overflow: hidden;
+  border-top: 0 solid #e5e8e9;
+  background: #f7f9f9;
+  opacity: 0;
+  transition: max-height 220ms ease, padding 220ms ease, opacity 160ms ease;
+}
+
+.tft-match-card.is-expanded .tft-match-details {
+  max-height: 520px;
+  padding-top: 16px;
+  padding-bottom: 18px;
+  border-top-width: 1px;
+  opacity: 1;
+}
+
+.tft-detail-block > span {
+  display: block;
+  margin-bottom: 9px;
+  color: #7b8389;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.tft-detail-units > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tft-detailed-unit {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  border: 1px solid #e2e6e7;
+  background: #fff;
+}
+
+.tft-detailed-unit-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.tft-detailed-unit strong,
+.tft-detailed-unit span,
+.tft-detailed-unit small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tft-detailed-unit strong {
+  font-size: 8px;
+}
+
+.tft-detailed-unit span {
+  margin-top: 2px;
+  color: var(--gold);
+  font-size: 7px;
+}
+
+.tft-detailed-unit small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.tft-detail-block dl {
+  margin: 0;
+}
+
+.tft-detail-block dl div {
+  padding: 7px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e4e7e8;
+}
+
+.tft-detail-block dt,
+.tft-detail-block dd {
+  margin: 0;
+  font-size: 8px;
+}
+
+.tft-detail-block dt {
+  color: var(--muted);
+}
+
+.tft-detail-block dd {
+  font-weight: 900;
+}
+
+.tft-board-placeholder {
+  padding: 10px;
+  border: 1px dashed #ccd2d5;
+  background: rgb(255 255 255 / 55%);
+}
+
+.tft-board-placeholder p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.7;
+}
+
+.results-content {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 34px 0 72px;
+  display: grid;
+  gap: 42px;
+}
+
+.analysis-dashboard {
+  padding: 30px;
   display: grid;
   gap: 34px;
+  border-top: 1px solid var(--line);
+  background: #f8f9f7;
 }
 
 .criteria-panel {
@@ -1015,7 +1890,7 @@ img {
 
 .analysis-summary-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border: 1px solid var(--line);
   background: var(--white);
 }
@@ -1049,6 +1924,102 @@ img {
   white-space: nowrap;
   font-size: 18px;
   font-weight: 950;
+}
+
+.detailed-analysis,
+.project-info {
+  border: 1px solid var(--line);
+  background: var(--white);
+}
+
+.detailed-analysis-toggle,
+.project-info > summary {
+  width: 100%;
+  min-height: 84px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  cursor: pointer;
+  color: var(--ink);
+  text-align: left;
+  list-style: none;
+  border: 1px solid var(--line);
+  background: var(--white);
+}
+
+.project-info > summary::-webkit-details-marker {
+  display: none;
+}
+
+.detailed-analysis-toggle span,
+.detailed-analysis-toggle strong,
+.detailed-analysis-toggle small,
+.project-info > summary span,
+.project-info > summary strong,
+.project-info > summary small {
+  display: block;
+}
+
+.detailed-analysis-toggle strong,
+.project-info > summary strong {
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.detailed-analysis-toggle small,
+.project-info > summary small {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.detailed-analysis-toggle b,
+.project-info > summary b {
+  width: 30px;
+  height: 30px;
+  position: relative;
+  flex: 0 0 30px;
+  border: 1px solid var(--line);
+}
+
+.detailed-analysis-toggle b::before,
+.detailed-analysis-toggle b::after,
+.project-info > summary b::before,
+.project-info > summary b::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 1px;
+  content: "";
+  background: var(--ink);
+  transform: translate(-50%, -50%);
+}
+
+.detailed-analysis-toggle b::after,
+.project-info > summary b::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+  transition: transform 0.2s ease;
+}
+
+.detailed-analysis-toggle.active b::after,
+.project-info[open] > summary b::after {
+  transform: translate(-50%, -50%) rotate(0);
+}
+
+.detailed-analysis-toggle {
+  margin-top: -24px;
+  margin-bottom: -12px;
+}
+
+.detailed-analysis-toggle:hover {
+  border-color: #aeb5ba;
+}
+
+.detailed-analysis {
+  overflow: hidden;
 }
 
 .playstyle-card {
@@ -1527,18 +2498,179 @@ img {
 
 .profile-inner {
   width: min(1180px, calc(100% - 48px));
-  min-height: 190px;
+  min-height: 238px;
   margin: 0 auto;
+  padding: 28px 0;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 28px;
+  grid-template-columns: minmax(330px, 0.8fr) minmax(560px, 1.4fr);
+  gap: 36px;
   align-items: center;
+}
+
+.profile-primary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 22px;
+  align-items: center;
+}
+
+.profile-overview {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.8fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.profile-ranks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.profile-rank-card {
+  min-width: 0;
+  min-height: 158px;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #373c40;
+  background: #1a1d20;
+}
+
+.profile-rank-label {
+  display: block;
+  margin-bottom: 14px;
+  color: #969da3;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.profile-rank-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.profile-rank-main > div {
+  min-width: 0;
+}
+
+.profile-tier-emblem {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.profile-rank-card strong,
+.profile-rank-card small,
+.profile-rank-card p {
+  display: block;
+}
+
+.profile-rank-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.profile-rank-card small {
+  margin-top: 3px;
+  color: var(--lime);
+  font-size: 10px;
+}
+
+.profile-rank-card p {
+  margin: 8px 0 0;
+  color: #969da3;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.profile-rank-card.unranked-card {
+  justify-content: center;
+}
+
+.profile-rank-card.unranked-card > span,
+.profile-rank-card.unranked-card small {
+  color: #969da3;
+  font-size: 9px;
+}
+
+.profile-rank-card.unranked-card strong {
+  margin: 9px 0 2px;
+  color: var(--white);
+}
+
+.profile-mastery {
+  min-width: 0;
+  min-height: 158px;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #373c40;
+  background: #1a1d20;
+}
+
+.profile-mastery > span {
+  display: block;
+  margin-bottom: 12px;
+  color: #969da3;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+#profile-mastery-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-mastery-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+
+.profile-mastery-item img {
+  width: 38px;
+  height: 38px;
+  object-fit: cover;
+}
+
+.profile-mastery-item strong,
+.profile-mastery-item span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-mastery-item strong {
+  font-size: 10px;
+}
+
+.profile-mastery-item span,
+.profile-mastery-empty {
+  margin: 3px 0 0;
+  color: #969da3;
+  font-size: 8px;
 }
 
 .profile-icon-wrap {
   position: relative;
-  width: 112px;
-  height: 112px;
+  width: 96px;
+  height: 96px;
   border: 3px solid var(--lime);
 }
 
@@ -1564,7 +2696,7 @@ img {
 
 .identity h2 {
   margin: 0;
-  font-size: 38px;
+  font-size: 30px;
   line-height: 1.1;
   font-weight: 950;
 }
@@ -1834,8 +2966,8 @@ img {
 }
 
 .match-toolbar {
-  min-height: 70px;
-  margin-bottom: 18px;
+  min-height: 52px;
+  margin-bottom: 8px;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -1847,6 +2979,8 @@ img {
 }
 
 .filter-tabs {
+  width: max-content;
+  margin-bottom: 18px;
   display: flex;
   border-bottom: 1px solid var(--line);
 }
@@ -2206,9 +3340,9 @@ img {
 }
 
 .tier-preview-link {
-  width: min(1180px, calc(100% - 48px));
+  width: 100%;
   min-height: 88px;
-  margin: 0 auto 80px;
+  margin: 0;
   padding: 18px 22px;
   display: flex;
   align-items: center;
@@ -2248,6 +3382,25 @@ img {
   grid-template-columns: 0.85fr 1.4fr;
   gap: 70px;
   border-top: 1px solid var(--ink);
+}
+
+.project-info {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto 72px;
+}
+
+.project-info-content {
+  padding: 0 24px 32px;
+  border-top: 1px solid var(--line);
+}
+
+.project-info .project-notes {
+  width: 100%;
+  padding: 42px 0;
+}
+
+.project-info .project-notes + .project-notes {
+  padding-bottom: 10px;
 }
 
 .project-notes-heading h2 {
@@ -2303,13 +3456,42 @@ footer p {
   display: none !important;
 }
 
+@media (max-width: 1100px) {
+  .profile-inner {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .profile-overview {
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.7fr);
+  }
+}
+
 @media (max-width: 900px) {
+  .tft-summary {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .tft-summary article {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .tft-match-card {
+    grid-template-columns: 54px 105px minmax(0, 1fr);
+  }
+
+  .tft-match-card .tft-card-section:nth-of-type(4),
+  .tft-match-card .tft-card-section:nth-of-type(5),
+  .tft-match-card .tft-card-section:nth-of-type(6) {
+    grid-column: 1 / -1;
+  }
+
   .criteria-grid {
     grid-template-columns: 1fr 1fr;
   }
 
   .analysis-summary-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .analysis-stat-card {
@@ -2341,7 +3523,8 @@ footer p {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  .sidebar,
+  .detailed-analysis .sidebar {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -2360,6 +3543,64 @@ footer p {
 }
 
 @media (max-width: 680px) {
+  .game-tabs {
+    padding: 0 12px;
+  }
+
+  .game-tabs button {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 8px;
+  }
+
+  .tft-profile {
+    padding: 24px 18px;
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .tft-profile-identity h2 {
+    font-size: 23px;
+  }
+
+  .tft-profile-icon {
+    width: 76px;
+    height: 76px;
+    flex-basis: 76px;
+  }
+
+  .tft-content-inner,
+  .tft-state {
+    width: calc(100% - 24px);
+  }
+
+  .tft-content-inner {
+    padding: 28px 0 54px;
+    gap: 34px;
+  }
+
+  .tft-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tft-match-card {
+    padding: 16px 14px;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 14px 12px;
+  }
+
+  .tft-match-stats {
+    grid-column: 1 / -1;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  .tft-match-card .tft-card-section:nth-of-type(4),
+  .tft-match-card .tft-card-section:nth-of-type(5),
+  .tft-match-card .tft-card-section:nth-of-type(6) {
+    grid-column: 1 / -1;
+  }
+
   .topbar {
     grid-template-columns: 1fr auto;
     min-height: 58px;
@@ -2507,9 +3748,23 @@ footer p {
 
   .profile-inner {
     width: calc(100% - 36px);
-    min-height: 156px;
-    grid-template-columns: 76px 1fr auto;
+    min-height: 0;
+    padding: 22px 0;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .profile-primary {
+    grid-template-columns: 76px minmax(0, 1fr) auto;
     gap: 15px;
+  }
+
+  .profile-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-ranks {
+    grid-template-columns: 1fr 1fr;
   }
 
   .profile-icon-wrap {
@@ -2528,15 +3783,27 @@ footer p {
     font-size: 13px;
   }
 
-  .dashboard {
+  .results-content {
     width: calc(100% - 24px);
-    padding-top: 22px;
+    padding: 24px 0 54px;
+    gap: 32px;
   }
 
   .analysis-dashboard {
-    width: calc(100% - 24px);
-    padding-top: 28px;
+    width: 100%;
+    padding: 22px 14px;
     gap: 28px;
+  }
+
+  .detailed-analysis-toggle,
+  .project-info > summary {
+    min-height: 76px;
+    padding: 16px;
+  }
+
+  .detailed-analysis-toggle {
+    margin-top: -16px;
+    margin-bottom: -6px;
   }
 
   .analysis-heading {
@@ -2616,7 +3883,8 @@ footer p {
     min-width: 560px;
   }
 
-  .sidebar {
+  .sidebar,
+  .detailed-analysis .sidebar {
     grid-template-columns: 1fr;
   }
 
@@ -2627,10 +3895,12 @@ footer p {
 
   .filter-tabs {
     width: 100%;
+    margin-bottom: 14px;
   }
 
   .filter-tabs button {
     flex: 1;
+    min-width: 0;
   }
 
   .match-content {
@@ -2685,15 +3955,24 @@ footer p {
   }
 
   .project-notes {
-    width: calc(100% - 36px);
-    padding: 54px 0 82px;
+    width: 100%;
+    padding: 36px 0;
     grid-template-columns: 1fr;
     gap: 32px;
   }
 
   .tier-preview-link {
+    width: 100%;
+    margin: 0;
+  }
+
+  .project-info {
     width: calc(100% - 24px);
-    margin-bottom: 70px;
+    margin-bottom: 54px;
+  }
+
+  .project-info-content {
+    padding: 0 16px 24px;
   }
 
   .project-notes-list {
@@ -2703,5 +3982,130 @@ footer p {
   .project-notes-list article,
   .project-notes-list article:nth-child(even) {
     border-right: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .profile-primary {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .profile-primary .profile-actions {
+    grid-column: 1 / -1;
+  }
+
+  .profile-icon-wrap {
+    width: 64px;
+    height: 64px;
+  }
+
+  .profile-ranks {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .tft-summary.tft-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .tft-compact-main {
+    grid-template-columns: 68px 112px minmax(0, 1fr) 60px;
+  }
+
+  .tft-build-topline {
+    grid-template-columns: 1fr;
+  }
+
+  .tft-match-card-compact .tft-augments {
+    display: none;
+  }
+
+  .tft-match-details {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  }
+
+  .tft-board-placeholder {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .tft-summary.tft-summary {
+    padding: 10px;
+  }
+
+  .tft-summary-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tft-summary .tft-summary-metrics article:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .tft-summary .tft-summary-metrics article:nth-last-child(-n + 4) {
+    border-bottom: 1px solid #e7e9ea;
+  }
+
+  .tft-summary .tft-summary-metrics article:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .tft-compact-main {
+    grid-template-columns: 60px minmax(0, 1fr) 52px;
+  }
+
+  .tft-match-card-compact .tft-placement {
+    padding-inline: 4px;
+  }
+
+  .tft-match-card-compact .tft-placement strong {
+    font-size: 32px;
+  }
+
+  .tft-match-card-compact .tft-match-meta {
+    padding: 13px 12px 9px;
+    border-right: 0;
+  }
+
+  .tft-build-overview {
+    grid-column: 1 / -1;
+    padding: 9px 10px 11px;
+    border-top: 1px solid #eceeef;
+  }
+
+  .tft-build-topline {
+    display: block;
+  }
+
+  .tft-match-card-compact .tft-traits {
+    overflow-x: auto;
+  }
+
+  .tft-match-card-compact .tft-units {
+    padding-bottom: 3px;
+    overflow-x: auto;
+  }
+
+  .tft-card-actions {
+    grid-column: 3;
+    grid-row: 1;
+    padding: 11px 5px;
+  }
+
+  .tft-details-button {
+    width: 42px;
+  }
+
+  .tft-match-details {
+    grid-template-columns: 1fr;
+  }
+
+  .tft-detail-units > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tft-match-card.is-expanded .tft-match-details {
+    max-height: 900px;
   }
 }
