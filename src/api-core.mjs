@@ -198,7 +198,7 @@ async function getSummonerProfile(gameName, tagLine) {
 
   const [summoner, matchIds, version] = await Promise.all([
     riotFetch(PLATFORM, `/lol/summoner/v4/summoners/by-puuid/${account.puuid}`),
-    riotFetch(REGION, `/lol/match/v5/matches/by-puuid/${account.puuid}/ids?queue=420&start=0&count=15`),
+    riotFetch(REGION, `/lol/match/v5/matches/by-puuid/${account.puuid}/ids?start=0&count=15`),
     getDdragonVersion()
   ]);
 
@@ -502,6 +502,9 @@ function selectTftRank(entries) {
 function compactTftMatch(match, puuid, staticData) {
   const participant = match?.info?.participants?.find((entry) => entry.puuid === puuid);
   if (!participant) return null;
+  const participants = (match?.info?.participants || [])
+    .map((entry) => compactTftParticipant(entry, staticData, entry.puuid === puuid))
+    .sort((a, b) => a.placement - b.placement);
 
   return {
     matchId: match.metadata?.match_id || match.metadata?.matchId,
@@ -515,37 +518,131 @@ function compactTftMatch(match, puuid, staticData) {
     level: Number(participant.level || 0),
     lastRound: Number(participant.last_round || 0),
     timeEliminated: Number(participant.time_eliminated || 0),
-    traits: (participant.traits || [])
-      .filter((trait) => Number(trait.num_units || 0) > 0)
-      .sort((a, b) =>
-        Number(b.style || 0) - Number(a.style || 0) ||
-        Number(b.num_units || 0) - Number(a.num_units || 0)
-      )
-      .slice(0, 6)
-      .map((trait) => ({
-        id: trait.name,
-        name: getTftStaticName(staticData.traits, trait.name),
-        units: Number(trait.num_units || 0),
-        style: Number(trait.style || 0),
-        tier: Number(trait.tier_current || 0)
-      })),
-    units: (participant.units || [])
-      .sort((a, b) => Number(b.tier || 0) - Number(a.tier || 0))
-      .map((unit) => ({
-        id: unit.character_id,
-        name: getTftStaticName(staticData.units, unit.character_id),
-        tier: Number(unit.tier || 1),
-        rarity: Number(unit.rarity || 0),
-        items: (unit.itemNames || []).map((itemId) => ({
-          id: itemId,
-          name: getTftStaticName(staticData.items, itemId)
-        }))
-      })),
+    companion: compactTftCompanion(participant.companion, staticData),
+    participants,
+    traits: compactTftTraits(participant.traits, staticData).slice(0, 6),
+    units: compactTftUnits(participant.units, staticData),
     augments: (participant.augments || []).map((augmentId) => ({
       id: augmentId,
       name: getTftStaticName(staticData.augments, augmentId)
     }))
   };
+}
+
+function compactTftParticipant(participant, staticData, isCurrentPlayer = false) {
+  return {
+    puuid: participant.puuid,
+    name: tftParticipantName(participant),
+    placement: Number(participant.placement || 0),
+    level: Number(participant.level || 0),
+    lastRound: Number(participant.last_round || 0),
+    timeEliminated: Number(participant.time_eliminated || 0),
+    goldLeft: Number(participant.gold_left || 0),
+    playersEliminated: Number(participant.players_eliminated || 0),
+    totalDamageToPlayers: Number(participant.total_damage_to_players || 0),
+    companion: compactTftCompanion(participant.companion, staticData),
+    traits: compactTftTraits(participant.traits, staticData).slice(0, 8),
+    units: compactTftUnits(participant.units, staticData),
+    isCurrentPlayer
+  };
+}
+
+function compactTftTraits(traits, staticData) {
+  return (traits || [])
+    .filter((trait) => Number(trait.num_units || 0) > 0)
+    .sort((a, b) =>
+      Number(b.style || 0) - Number(a.style || 0) ||
+      Number(b.num_units || 0) - Number(a.num_units || 0)
+    )
+    .map((trait) => ({
+      id: trait.name,
+      name: getTftStaticName(staticData.traits, trait.name),
+      units: Number(trait.num_units || 0),
+      style: Number(trait.style || 0),
+      tier: Number(trait.tier_current || 0)
+    }));
+}
+
+function compactTftUnits(units, staticData) {
+  return (units || [])
+    .sort((a, b) => Number(b.tier || 0) - Number(a.tier || 0))
+    .map((unit) => {
+      const summon = getTftSummonInfo(unit.character_id);
+      return {
+        id: unit.character_id,
+        name: summon?.name || getTftStaticName(staticData.units, unit.character_id),
+        tier: Number(unit.tier || 1),
+        rarity: Number(unit.rarity || 0),
+        isSummon: Boolean(summon),
+        summonTrait: summon?.trait || "",
+        items: (unit.itemNames || []).map((itemId) => ({
+          id: itemId,
+          name: getTftStaticName(staticData.items, itemId)
+        }))
+      };
+    });
+}
+
+function compactTftCompanion(companion, staticData) {
+  if (!companion) return null;
+  const ids = [
+    companion.content_ID,
+    companion.contentId,
+    companion.item_ID,
+    companion.itemId,
+    companion.skin_ID,
+    companion.skinId,
+    companion.species
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+  const asset = ids
+    .map((id) => getTftStaticEntry(staticData.companions, id))
+    .find((entry) => entry.imageUrl) ||
+    ids
+      .map((id) => getTftStaticEntry(staticData.companions, id))
+      .find((entry) => entry.name);
+
+  return {
+    id: ids[0] || "",
+    itemId: companion.item_ID ?? companion.itemId ?? null,
+    skinId: companion.skin_ID ?? companion.skinId ?? null,
+    species: companion.species || "",
+    name: asset?.name || cleanTftName(ids[0] || companion.species || "TFT"),
+    imageUrl: asset?.imageUrl || tftCompanionFallbackImage(companion)
+  };
+}
+
+function tftCompanionFallbackImage(companion) {
+  const itemId = companion?.item_ID ?? companion?.itemId;
+  const skinId = companion?.skin_ID ?? companion?.skinId;
+  if (itemId === undefined || itemId === null || skinId === undefined || skinId === null) return null;
+  return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/companions/${itemId}/${skinId}.png`;
+}
+
+function tftParticipantName(participant) {
+  const gameName = participant.riotIdGameName || participant.gameName;
+  const tagLine = participant.riotIdTagline || participant.riotIdTagLine || participant.tagLine;
+  if (gameName && tagLine) return `${gameName}#${tagLine}`;
+  return gameName || participant.summonerName || "Unknown";
+}
+
+function getTftSummonInfo(id) {
+  const value = String(id || "");
+  if (!/summon/i.test(value)) return null;
+  const normalized = value.toLowerCase();
+  if (/vayne|vaynechampion|vaien|vien|byen|바이엔/i.test(normalized)) {
+    return { name: "바이엔", trait: "길잡이 소환수" };
+  }
+  if (/vi|via|bia|비아/i.test(normalized)) {
+    return { name: "비아", trait: "길잡이 소환수" };
+  }
+  const fallbackName = value
+    .replace(/^TFT\d+_/, "")
+    .replace(/^TFT_/, "")
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^Summon\s*/i, "")
+    .trim();
+  return { name: fallbackName || "소환수", trait: "소환 유닛" };
 }
 
 function summarizeTftMatches(matches) {
@@ -589,6 +686,8 @@ function mostFrequentTftName(counts) {
 }
 
 function cleanTftName(value) {
+  const summon = getTftSummonInfo(value);
+  if (summon) return summon.name;
   return String(value || "")
     .replace(/^TFT\d+_Augment_/, "")
     .replace(/^TFT\d+_/, "")
@@ -622,7 +721,8 @@ async function getTftStaticDataVersion(version) {
     units: "tft-champion.json",
     traits: "tft-trait.json",
     augments: "tft-augments.json",
-    items: "tft-item.json"
+    items: "tft-item.json",
+    companions: "tft-tactician.json"
   };
   const entries = await Promise.all(
     Object.entries(files).map(async ([type, filename]) => {
@@ -660,6 +760,10 @@ function createTftAssetMap(data, version) {
     };
     assets[key] = asset;
     assets[id] = asset;
+    if (entry?.contentId) assets[entry.contentId] = asset;
+    if (entry?.content_ID) assets[entry.content_ID] = asset;
+    if (entry?.itemId) assets[String(entry.itemId)] = asset;
+    if (entry?.item_id) assets[String(entry.item_id)] = asset;
   }
   return assets;
 }
@@ -670,7 +774,7 @@ function tftDdragonVersion(gameVersion) {
 }
 
 function emptyTftStaticData() {
-  return { units: {}, traits: {}, augments: {}, items: {} };
+  return { units: {}, traits: {}, augments: {}, items: {}, companions: {} };
 }
 
 function mergeTftStaticData(target, source) {
@@ -696,7 +800,8 @@ function compactTftStaticData(staticData, matches) {
     units: new Set(),
     traits: new Set(),
     augments: new Set(),
-    items: new Set()
+    items: new Set(),
+    companions: new Set()
   };
 
   for (const match of matches) {
@@ -706,6 +811,17 @@ function compactTftStaticData(staticData, matches) {
       for (const item of unit.items) ids.items.add(item.id);
     }
     for (const augment of match.augments) ids.augments.add(augment.id);
+    if (match.companion?.id) ids.companions.add(match.companion.id);
+    if (match.companion?.itemId !== null && match.companion?.itemId !== undefined) ids.companions.add(match.companion.itemId);
+    for (const participant of match.participants || []) {
+      if (participant.companion?.id) ids.companions.add(participant.companion.id);
+      if (participant.companion?.itemId !== null && participant.companion?.itemId !== undefined) ids.companions.add(participant.companion.itemId);
+      for (const trait of participant.traits || []) ids.traits.add(trait.id);
+      for (const unit of participant.units || []) {
+        ids.units.add(unit.id);
+        for (const item of unit.items || []) ids.items.add(item.id);
+      }
+    }
   }
 
   return Object.fromEntries(

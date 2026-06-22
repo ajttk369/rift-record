@@ -549,29 +549,42 @@ function renderTftSummary(data) {
   const summary = data.tftSummary;
   const rank = data.tftRank;
   const cards = [
-    ["TFT 티어", rank ? `${capitalize(rank.tier)} ${rank.rank}` : "Unranked"],
-    ["LP", rank ? `${number(rank.leaguePoints)} LP` : "-"],
-    ["평균 등수", summary.games ? `${Number(summary.averagePlacement).toFixed(1)}등` : "-"],
-    ["Top 4 비율", `${number(summary.topFourRate)}%`],
-    ["1등 횟수", `${number(summary.firstPlaces)}회`],
-    ["평균 레벨", Number(summary.averageLevel).toFixed(1)],
-    ["주요 특성", summary.mostTrait || "-"],
-    ["주요 유닛", summary.mostUnit || "-"]
+    ["평균 등수", summary.games ? `${Number(summary.averagePlacement).toFixed(1)}등` : "-", "avg"],
+    ["Top 4", `${number(summary.topFourRate)}%`, "top4"],
+    ["1등", `${number(summary.firstPlaces)}회`, "first"],
+    ["평균 레벨", summary.games ? Number(summary.averageLevel).toFixed(1) : "-", "level"],
+    ["주요 특성", summary.mostTrait || "-", "trait"],
+    ["주요 유닛", summary.mostUnit || "-", "unit"]
   ];
 
   document.querySelector("#tft-summary").innerHTML = `
-    <div class="tft-summary-metrics">
-      ${cards.map(([label, value]) => `
-        <article><span>${label}</span><strong>${escapeHtml(value)}</strong></article>
-      `).join("")}
-    </div>
-    <article class="tft-placement-trend">
-      <div>
-        <span>최근 등수 추이</span>
-        <strong>낮을수록 좋은 기록</strong>
+    <div class="tft-summary-overview">
+      <article class="tft-season-card">
+        <span>RANKED TFT</span>
+        <strong>${rank ? escapeHtml(`${capitalize(rank.tier)} ${rank.rank}`) : "Unranked"}</strong>
+        <p>${rank
+          ? `${number(rank.leaguePoints)} LP · ${number(rank.wins)}승 ${number(rank.losses)}패`
+          : "이번 시즌 랭크 정보 없음"}</p>
+      </article>
+      <div class="tft-summary-metrics">
+        ${cards.map(([label, value, type]) => `
+          <article class="metric-${type}"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>
+        `).join("")}
       </div>
-      ${renderTftPlacementChart(data.tftMatches)}
-    </article>
+    </div>
+    <div class="tft-summary-side">
+      <article class="tft-placement-distribution">
+        <div><span>등수 분포</span><strong>최근 ${number(summary.games || data.tftMatches.length)}게임</strong></div>
+        ${renderTftPlacementDistribution(data.tftMatches)}
+      </article>
+      <article class="tft-placement-trend">
+        <div>
+          <span>최근 등수 추이</span>
+          <strong>낮을수록 좋은 기록</strong>
+        </div>
+        ${renderTftPlacementChart(data.tftMatches)}
+      </article>
+    </div>
   `;
 }
 
@@ -594,6 +607,7 @@ function tftMatchCard(match) {
   const placementClass = match.placement === 1
     ? "first"
     : match.placement <= 4 ? "top-four" : "bottom-four";
+  const companion = tftCompanionPortrait(match.companion, "tft-player-companion");
   const traits = match.traits.length
     ? match.traits.map((trait) =>
       `<span class="tft-trait tier-${Math.min(trait.style, 4)}" title="${escapeHtml(getTftTraitName(trait))}">
@@ -621,6 +635,7 @@ function tftMatchCard(match) {
     <article class="tft-match-card tft-match-card-compact ${placementClass}">
       <div class="tft-compact-main">
         <div class="tft-placement">
+          ${companion}
           <strong>${match.placement}</strong><span>등</span>
           <b>${match.placement <= 4 ? "TOP 4" : "BOTTOM 4"}</b>
         </div>
@@ -645,26 +660,123 @@ function tftMatchCard(match) {
         </div>
       </div>
       <div class="tft-match-details">
-        <div class="tft-detail-block tft-detail-units">
-          <span>전체 유닛 · 성급 · 아이템</span>
-          <div>${detailedUnits}</div>
-        </div>
-        <div class="tft-detail-block">
-          <span>경기 정보</span>
-          <dl>
-            <div><dt>최종 등수</dt><dd>${match.placement}등</dd></div>
-            <div><dt>레벨</dt><dd>Lv.${match.level}</dd></div>
-            <div><dt>최종 라운드</dt><dd>${escapeHtml(formatTftRound(match.lastRound))}</dd></div>
-            <div><dt>제거 시점</dt><dd>${escapeHtml(formatTftElimination(match.timeEliminated))}</dd></div>
-          </dl>
-        </div>
-        <div class="tft-detail-block tft-board-placeholder">
-          <span>배치도</span>
-          <p>추후 전장 배치 정보 확장을 위한 영역입니다.</p>
-        </div>
+        ${tftMatchDetailTable(match)}
       </div>
     </article>
   `;
+}
+
+function tftMatchDetailTable(match) {
+  const participants = match.participants?.length ? match.participants : [{
+    name: "내 기록",
+    placement: match.placement,
+    level: match.level,
+    lastRound: match.lastRound,
+    goldLeft: 0,
+    playersEliminated: 0,
+    totalDamageToPlayers: 0,
+    companion: match.companion,
+    traits: match.traits,
+    units: match.units,
+    isCurrentPlayer: true
+  }];
+
+  return `
+    <div class="tft-detail-table">
+      <div class="tft-detail-table-head">
+        <span>#</span>
+        <span>소환사</span>
+        <span>라운드</span>
+        <span>시너지</span>
+        <span>챔피언</span>
+        <span>업적</span>
+      </div>
+      ${participants.map(tftParticipantRow).join("")}
+    </div>
+  `;
+}
+
+function tftParticipantRow(participant) {
+  return `
+    <article class="tft-participant-row ${participant.isCurrentPlayer ? "is-current" : ""}">
+      <div class="tft-participant-placement">${number(participant.placement)}</div>
+      <div class="tft-participant-player">
+        ${tftCompanionPortrait(participant.companion, "tft-participant-companion")}
+        <div>
+          <strong>${escapeHtml(stripRiotTag(participant.name))}</strong>
+          <span>Lv.${number(participant.level)}</span>
+        </div>
+      </div>
+      <div class="tft-participant-round">
+        <strong>${escapeHtml(formatTftRound(participant.lastRound))}</strong>
+        <span>${escapeHtml(formatTftElimination(participant.timeEliminated))}</span>
+      </div>
+      <div class="tft-participant-traits">${tftMiniTraits(participant.traits)}</div>
+      <div class="tft-participant-units">${tftMiniUnits(participant.units)}</div>
+      <div class="tft-participant-stats">
+        <span>G ${number(participant.goldLeft)}</span>
+        <span>KO ${number(participant.playersEliminated)}</span>
+        <span>DMG ${number(participant.totalDamageToPlayers)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function tftMiniTraits(traits = []) {
+  return traits.length
+    ? traits.slice(0, 8).map((trait) => `
+      <span class="tft-mini-trait tier-${Math.min(trait.style, 4)}" title="${escapeHtml(getTftTraitName(trait))}">
+        ${tftAssetImage("traits", trait, "tft-mini-trait-icon")}
+        <em>${escapeHtml(shortTftName(getTftTraitName(trait)))}</em>
+        <b>${number(trait.units)}</b>
+      </span>
+    `).join("")
+    : '<span class="tft-empty-chip">-</span>';
+}
+
+function tftMiniUnits(units = []) {
+  return units.length
+    ? units.map((unit) => {
+      const items = unit.items?.slice(0, 3) || [];
+      const name = getTftUnitName(unit);
+      return `
+        <span class="tft-mini-unit rarity-${Math.min(unit.rarity || 0, 5)} ${unit.isSummon ? "is-summon" : ""}" title="${escapeHtml(`${name} · ${unit.summonTrait || `${unit.tier}성`}`)}">
+          ${tftAssetImage("units", unit, "tft-mini-unit-icon")}
+          <b>${unit.isSummon ? "소환" : "★".repeat(Math.min(unit.tier, 3))}</b>
+          ${unit.isSummon ? `<em>${escapeHtml(name)}</em>` : ""}
+          <small>${items.map((item) => tftAssetImage("items", item, "tft-mini-item-icon")).join("")}</small>
+        </span>
+      `;
+    }).join("")
+    : '<span class="tft-empty-chip">-</span>';
+}
+
+function tftCompanionPortrait(companion, className) {
+  const name = getTftCompanionName(companion);
+  const imageUrl = companion?.imageUrl || getTftStaticEntry("companions", companion).imageUrl;
+  if (!imageUrl) {
+    return `
+      <span class="${className} tft-companion-fallback" title="${escapeHtml(name)}">
+        <b>✦</b>
+        <small>전략가</small>
+      </span>
+    `;
+  }
+  return `<img class="${className}" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(name)}" loading="lazy" title="${escapeHtml(name)}">`;
+}
+
+function getTftCompanionName(companion) {
+  if (!companion) return "전략가";
+  return companion.name || getTftStaticEntry("companions", companion).name || "전략가";
+}
+
+function stripRiotTag(name) {
+  return String(name || "Unknown").split("#")[0];
+}
+
+function shortTftName(name) {
+  const text = String(name || "-").replace(/^TFT\d+_?/i, "");
+  return text.length > 5 ? `${text.slice(0, 5)}…` : text;
 }
 
 function renderTftPlacementChart(matches) {
@@ -701,11 +813,12 @@ function tftUnitPortrait(unit) {
   const name = getTftUnitName(unit);
   const items = unit.items?.slice(0, 3) || [];
   return `
-    <span class="tft-unit-portrait rarity-${Math.min(unit.rarity || 0, 5)}" title="${escapeHtml(`${name} · ${unit.tier}성`)}">
+    <span class="tft-unit-portrait rarity-${Math.min(unit.rarity || 0, 5)} ${unit.isSummon ? "is-summon" : ""}" title="${escapeHtml(`${name} · ${unit.summonTrait || `${unit.tier}성`}`)}">
       <span class="tft-unit-image">
         ${tftAssetImage("units", unit, "tft-unit-icon")}
-        <b>${"★".repeat(Math.min(unit.tier, 3))}</b>
+        <b>${unit.isSummon ? "소환" : "★".repeat(Math.min(unit.tier, 3))}</b>
       </span>
+      ${unit.isSummon ? `<em class="tft-summon-name">${escapeHtml(name)}</em>` : ""}
       <span class="tft-item-icons">
         ${items.map((item) => tftAssetImage("items", item, "tft-item-icon")).join("")}
       </span>
@@ -719,7 +832,7 @@ function tftDetailedUnit(unit) {
       ${tftAssetImage("units", unit, "tft-detailed-unit-icon")}
       <div>
         <strong>${escapeHtml(getTftUnitName(unit))}</strong>
-        <span>${"★".repeat(Math.min(unit.tier, 3))}</span>
+        <span>${unit.isSummon ? escapeHtml(unit.summonTrait || "소환 유닛") : "★".repeat(Math.min(unit.tier, 3))}</span>
         <small>${unit.items?.length
           ? unit.items.map(getTftItemName).map(escapeHtml).join(" · ")
           : "장착 아이템 없음"}</small>
@@ -1444,6 +1557,8 @@ function renderMasteries(data) {
 function renderMatches(data) {
   if (!data) return;
 
+  updateMatchFilterCounts(data.matches);
+
   const filtered = data.matches.filter((match) => {
     const type = getQueueType(match.info.queueId);
     return activeFilter === "all" || type.category === activeFilter;
@@ -1471,6 +1586,23 @@ function renderMatches(data) {
       input.value = riotId;
       search(riotId);
     });
+  });
+}
+
+function updateMatchFilterCounts(matches = []) {
+  const counts = matches.reduce((total, match) => {
+    const category = getQueueType(match.info.queueId).category;
+    total.all += 1;
+    total[category] = (total[category] || 0) + 1;
+    return total;
+  }, { all: 0, solo: 0, flex: 0, normal: 0, aram: 0 });
+
+  document.querySelectorAll(".filter-tabs button").forEach((button) => {
+    const filter = button.dataset.filter;
+    if (!filter) return;
+    button.dataset.label ||= button.textContent.trim();
+    const count = counts[filter] || 0;
+    button.innerHTML = `<span>${escapeHtml(button.dataset.label)}</span><b>${count}</b>`;
   });
 }
 
@@ -1644,6 +1776,30 @@ function teamColumn(label, participants, data) {
           <span class="participant-kda">${participant.kills}/${participant.deaths}/${participant.assists}</span>
         </div>
       `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderTftPlacementDistribution(matches) {
+  if (!matches.length) return '<p class="tft-chart-empty">최근 경기 기록이 없습니다.</p>';
+  const counts = Array.from({ length: 8 }, (_, index) =>
+    matches.filter((match) => match.placement === index + 1).length
+  );
+  const max = Math.max(...counts, 1);
+
+  return `
+    <div class="tft-placement-bars">
+      ${counts.map((count, index) => {
+        const placement = index + 1;
+        const height = Math.max(8, Math.round((count / max) * 48));
+        return `
+          <span class="${placement <= 4 ? "is-top4" : "is-bottom4"}">
+            <b style="height:${height}px"></b>
+            <em>${placement}</em>
+            <small>${count}</small>
+          </span>
+        `;
       }).join("")}
     </div>
   `;
@@ -1953,6 +2109,7 @@ function createDemoTftData(lolData) {
   const traits = ["별 수호자", "전략가", "기원자", "난동꾼", "결투가", "요새"];
   const units = ["아리", "럭스", "세라핀", "가렌", "이즈리얼", "리 신", "소나", "징크스"];
   const augments = ["판도라의 아이템", "보석 연꽃", "전투 마법사", "회복의 구", "단결된 의지"];
+  const companion = { id: "demo-chibi-seraphine", name: "미니 수정장미 세라핀", imageUrl: null };
   const tftMatches = Array.from({ length: 10 }, (_, index) => ({
     matchId: `TFT_DEMO_${index + 1}`,
     gameDatetime: Date.now() - (index + 1) * 4 * 60 * 60 * 1000,
@@ -1964,20 +2121,41 @@ function createDemoTftData(lolData) {
     level: [9, 8, 9, 8, 7, 9, 8, 9, 7, 8][index],
     lastRound: [36, 31, 38, 34, 27, 35, 30, 37, 25, 33][index],
     timeEliminated: 1780 + index * 28,
+    companion,
     traits: [
-      { name: traits[index % traits.length], units: 6, style: 3, tier: 2 },
-      { name: traits[(index + 2) % traits.length], units: 3, style: 1, tier: 1 }
+      { id: `trait-${index}-main`, name: traits[index % traits.length], units: 6, style: 3, tier: 2 },
+      { id: `trait-${index}-sub`, name: traits[(index + 2) % traits.length], units: 3, style: 1, tier: 1 }
     ],
     units: Array.from({ length: 7 }, (_, unitIndex) => ({
+      id: `unit-${index}-${unitIndex}`,
       name: units[(index + unitIndex) % units.length],
       tier: unitIndex < 2 ? 2 : 1,
       rarity: unitIndex % 5,
       items: []
     })),
     augments: Array.from({ length: 3 }, (_, augmentIndex) =>
-      augments[(index + augmentIndex) % augments.length]
+      ({ id: `augment-${index}-${augmentIndex}`, name: augments[(index + augmentIndex) % augments.length] })
     )
   }));
+  tftMatches.forEach((match, matchIndex) => {
+    match.participants = Array.from({ length: 8 }, (_, playerIndex) => {
+      const placement = playerIndex + 1;
+      return {
+        name: playerIndex === match.placement - 1 ? "Hide on bush#KR1" : `TFT Player ${placement}#KR1`,
+        placement,
+        level: Math.max(6, 9 - Math.floor(playerIndex / 2)),
+        lastRound: Math.max(21, match.lastRound - Math.floor(playerIndex / 2)),
+        timeEliminated: Math.max(620, match.timeEliminated - playerIndex * 80),
+        goldLeft: (matchIndex + playerIndex) % 54,
+        playersEliminated: playerIndex % 4,
+        totalDamageToPlayers: 180 - playerIndex * 18,
+        companion: playerIndex === match.placement - 1 ? companion : { id: `demo-companion-${playerIndex}`, name: `전략가 ${placement}`, imageUrl: null },
+        traits: match.traits,
+        units: match.units.slice(0, Math.max(4, 7 - Math.floor(playerIndex / 3))),
+        isCurrentPlayer: playerIndex === match.placement - 1
+      };
+    });
+  });
   const placements = tftMatches.map((match) => match.placement);
 
   return {
