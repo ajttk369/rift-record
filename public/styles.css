@@ -4275,7 +4275,7 @@ input:focus-visible {
   max-width: 720px;
   margin-bottom: 38px;
   font-size: clamp(46px, 7vw, 78px);
-  letter-spacing: -0.055em;
+  letter-spacing: 0;
   text-wrap: balance;
 }
 
@@ -4479,7 +4479,7 @@ input:focus-visible {
 
 .identity h2 {
   font-size: 32px;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
 }
 
 .identity h2 small,
@@ -4580,7 +4580,7 @@ input:focus-visible {
 .analysis-heading h2,
 .match-toolbar h2 {
   color: var(--dashboard-text);
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
 }
 
 .analysis-heading small,
@@ -4633,7 +4633,7 @@ input:focus-visible {
   margin-top: 24px;
   color: var(--dashboard-text);
   font-size: clamp(21px, 2vw, 28px);
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .analysis-stat-card:first-child strong {
@@ -6968,7 +6968,7 @@ html[data-theme="dark"] .participant-name.participant-search:hover {
 
 .match-toolbar h2 {
   margin-bottom: 4px;
-  letter-spacing: -.03em;
+  letter-spacing: 0;
 }
 
 .filter-tabs {
@@ -7020,7 +7020,7 @@ html[data-theme="dark"] .participant-name.participant-search:hover {
 }
 
 .match-result-line strong {
-  letter-spacing: -.02em;
+  letter-spacing: 0;
 }
 
 .champion-image,
@@ -7544,7 +7544,7 @@ html[data-theme="dark"] .tft-match-card-compact .tft-trait.tier-4 {
 .tft-companion-fallback small {
   font-size: 7px;
   line-height: 1;
-  letter-spacing: -.05em;
+  letter-spacing: 0;
 }
 
 .tft-match-details {
@@ -8047,4 +8047,71 @@ html[data-theme="dark"] .tft-participant-row.is-current .tft-participant-placeme
     width: 40px;
     flex-basis: 40px;
   }
+
+  .analysis-summary-grid .analysis-stat-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .detailed-analysis-toggle {
+    padding: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .detailed-analysis-toggle > span:first-child {
+    min-width: 0;
+  }
+
+  .detailed-analysis-toggle small {
+    line-height: 1.5;
+    word-break: keep-all;
+  }
+
+  .analysis-toggle-action {
+    min-width: max-content;
+    flex-shrink: 0;
+  }
+
+  .analysis-toggle-action em {
+    white-space: nowrap;
+  }
+}
+
+/* Keep Korean copy readable while allowing long technical terms to wrap safely. */
+.text-line {
+  display: block;
+}
+
+.welcome-copy,
+.tier-page-heading > div:first-child,
+.project-notes-heading,
+.project-info summary > span {
+  min-width: 0;
+}
+
+.welcome-copy h2,
+.welcome-copy p,
+.tier-page-heading h1,
+.tier-page-heading p,
+.criteria-panel p,
+.analysis-heading h2,
+.analysis-heading small,
+.detailed-analysis-toggle strong,
+.detailed-analysis-toggle small,
+.project-info summary strong,
+.project-info summary small,
+.built-grid strong,
+.built-grid p,
+.project-notes-heading h2,
+.project-notes-list p,
+.tier-preview-link strong,
+.tier-preview-link small {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.welcome-copy p {
+  max-width: 620px;
 }

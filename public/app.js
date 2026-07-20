@@ -258,7 +258,7 @@ function renderChampionTiers() {
 
   document.querySelector("#tier-sample-summary").innerHTML = `
     <strong>${number(tierData.collectedMatches)}</strong>개 매치 수집
-    <span>${activeLane} 표본 ${number(tierData.positionSamples)}개 · 최소 산정 표본 ${tierData.minimumSample}게임</span>
+    <span>${activeLane} 표본 ${number(tierData.positionSamples)}개 · 최소 산정 표본 ${tierData.minimumSample}경기</span>
   `;
 
   const rows = tierData.champions
@@ -283,7 +283,7 @@ function renderChampionTiers() {
             <th>순위</th>
             <th>티어</th>
             <th>챔피언</th>
-            <th>게임</th>
+            <th>경기</th>
             <th>승률</th>
             <th>픽률</th>
             <th>Avg KDA</th>
@@ -574,7 +574,7 @@ function renderTftSummary(data) {
     </div>
     <div class="tft-summary-side">
       <article class="tft-placement-distribution">
-        <div><span>등수 분포</span><strong>최근 ${number(summary.games || data.tftMatches.length)}게임</strong></div>
+        <div><span>등수 분포</span><strong>최근 ${number(summary.games || data.tftMatches.length)}경기</strong></div>
         ${renderTftPlacementDistribution(data.tftMatches)}
       </article>
       <article class="tft-placement-trend">
@@ -794,7 +794,7 @@ function renderTftPlacementChart(matches) {
   });
 
   return `
-    <svg class="tft-placement-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 10게임 등수 추이">
+    <svg class="tft-placement-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="최근 10경기 등수 추이">
       <line x1="${paddingX}" y1="${paddingY}" x2="${width - paddingX}" y2="${paddingY}" class="top-four-line"></line>
       <line x1="${paddingX}" y1="${height / 2}" x2="${width - paddingX}" y2="${height / 2}" class="middle-line"></line>
       <line x1="${paddingX}" y1="${height - paddingY}" x2="${width - paddingX}" y2="${height - paddingY}" class="bottom-line"></line>
@@ -968,7 +968,7 @@ function analyzePlayerMatches(data) {
     const cs = (player.totalMinionsKilled || 0) + (player.neutralMinionsKilled || 0);
     const kda = ((player.kills || 0) + (player.assists || 0)) / Math.max(player.deaths || 0, 1);
     const killParticipation = teamKills
-      ? (((player.kills || 0) + (player.assists || 0)) / teamKills) * 100
+      ? Math.min(100, (((player.kills || 0) + (player.assists || 0)) / teamKills) * 100)
       : 0;
     const position = normalizePlayerPosition(player.teamPosition || player.individualPosition);
 
@@ -1273,7 +1273,7 @@ function renderChampionPerformance(analysis, data) {
       <article class="personal-performance-card">
         <div class="performance-identity">
           <img src="${championImage(data.ddragonVersion, stat.name)}" width="46" height="46" alt="${escapeHtml(stat.name)}">
-          <div><strong>${championDisplayName(data, stat.name)}</strong><span>${stat.games}게임 · ${positionLabel(stat.primaryPosition)}</span></div>
+          <div><strong>${championDisplayName(data, stat.name)}</strong><span>${stat.games}경기 · ${positionLabel(stat.primaryPosition)}</span></div>
           <small class="personal-tag">${championPerformanceTag(stat)}</small>
         </div>
         <div class="personal-metrics">
@@ -1366,13 +1366,13 @@ function renderRecommendedPicks(analysis, data) {
         <img src="${championImage(data.ddragonVersion, pick.name)}" width="58" height="58" alt="${escapeHtml(pick.name)}">
         <div>
           <strong>${championDisplayName(data, pick.name)}</strong>
-          <small>${pick.games}게임 · 승률 ${pick.winRate.toFixed(0)}% · ${pick.avgKDA.toFixed(2)} KDA</small>
+          <small>${pick.games}경기 · 승률 ${pick.winRate.toFixed(0)}% · ${pick.avgKDA.toFixed(2)} KDA</small>
         </div>
         <p>${recommendedReason(pick)}</p>
         ${pick.games < 3 ? '<b>Low Sample</b>' : ""}
       </article>
     `).join("")
-    : '<p class="analysis-empty">추천에 필요한 챔피언별 2게임 이상의 표본이 없습니다.</p>';
+    : '<p class="analysis-empty">추천에 필요한 챔피언별 2경기 이상의 표본이 없습니다.</p>';
 }
 
 function recommendedReason(pick) {
@@ -1399,7 +1399,7 @@ function renderPositionPerformance(analysis) {
       <article class="position-card ${stat ? "played" : "empty"}">
         <strong>${positionLabel(position)}</strong>
         ${stat ? `
-          <span>${stat.games}게임 · 승률 ${stat.winRate.toFixed(0)}%</span>
+          <span>${stat.games}경기 · 승률 ${stat.winRate.toFixed(0)}%</span>
           <div><b>${stat.avgKDA.toFixed(2)}</b><small>KDA</small></div>
           <div><b>${stat.avgCSPerMinute.toFixed(1)}</b><small>CS/분</small></div>
           <div><b>${number(Math.round(stat.avgDamage))}</b><small>딜량</small></div>
@@ -1431,7 +1431,7 @@ function renderRecentTrends(analysis) {
 
 function renderImprovementTips(analysis) {
   document.querySelector("#improvement-tips").innerHTML = analysis.tips.map((tip, index) => `
-    <article><strong>0${index + 1}</strong><p>${escapeHtml(tip)}</p><span>최근 ${analysis.count}게임 기준</span></article>
+    <article><strong>0${index + 1}</strong><p>${escapeHtml(tip)}</p><span>최근 ${analysis.count}경기 기준</span></article>
   `).join("");
 }
 
@@ -1621,7 +1621,7 @@ function matchCard(match, data) {
     .reduce((total, participant) => total + (participant.kills || 0), 0);
 
   const killParticipation = totalTeamKills
-    ? Math.round(((player.kills + player.assists) / totalTeamKills) * 100)
+    ? Math.min(100, Math.round(((player.kills + player.assists) / totalTeamKills) * 100))
     : 0;
 
   const kda = player.deaths

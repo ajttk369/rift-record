@@ -1208,7 +1208,7 @@ function cacheRowToApiRow(row, staticData) {
 
   return {
     championId: row.champion_id,
-    championName: row.champion_name,
+    championName: champion.name || row.champion_name,
     championAssetId: champion.id,
     position: row.position,
     totalGames: Number(row.total_games),
