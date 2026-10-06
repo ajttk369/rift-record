@@ -8194,7 +8194,15 @@ body { letter-spacing: 0; }
 .filter-tabs button { border-radius: 4px; min-height: 40px; font-size: 12px; }
 .filter-tabs button span, .filter-tabs button b { font-size: 12px; }
 .scope-note { font-size: 12px; color: var(--theme-muted); line-height: 1.7; }
-.spell-icon { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; }
+.spell-icon { flex: 0 0 24px; width: 24px; height: 24px; border-radius: 4px; object-fit: cover; }
+/* Keep spell/rune icons separate from the seven fixed-size item slots. */
+.match-card .champion-block { min-width: 0; grid-template-columns: 64px minmax(0, 1fr); }
+.match-card .champion-block > .champion-image { grid-row: 1; }
+.match-card .champion-block > .build-row { grid-column: 1 / -1; }
+.match-card .build-row { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; margin-top: 0; gap: 8px; align-items: start; }
+.match-card .rune-row { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.match-card .item-row { display: grid; grid-template-columns: repeat(7, 26px); gap: 4px; width: max-content; margin-top: 0; }
+.match-card .item-row img, .match-card .item-row .item-empty { display: block; width: 26px; height: 26px; object-fit: cover; }
 .participant-metrics { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--theme-muted); }
 .participant-metrics b { color: var(--theme-text-soft); }
 .participant-build { grid-column: 2 / -1; margin-top: 4px; }
@@ -8246,6 +8254,7 @@ body { letter-spacing: 0; }
   .performance strong { font-size: 12px; white-space: nowrap; }
   .performance span { font-size: 11px; }
   .participant { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .match-card .champion-block { grid-template-columns: 56px minmax(0, 1fr); }
   .participant-name, .participant-kda { font-size: 12px; }
   .detail-metric-grid span { font-size: 11px; }
   .tft-profile { padding: 16px 14px; }
