@@ -310,20 +310,17 @@ function renderChampionTiers() {
     return;
   }
 
+  const columns = [
+    ["순위", null], ["티어", null], ["챔피언", null],
+    ["경기", "totalGames"], ["승률", "winRate"], ["픽률", "pickRate"],
+    ["평균 KDA", "averageKDA"], ["평균 CS", null], ["티어 점수", "tierScore"]
+  ];
   championTierBoard.innerHTML = `
     <div class="tier-table-wrap">
-      <table class="tier-table">
+      <table class="tier-table" data-sort="${escapeHtml(activeTierSort)}" aria-label="${escapeHtml(activeLane)} 챔피언 성과">
         <thead>
           <tr>
-            <th>순위</th>
-            <th>티어</th>
-            <th>챔피언</th>
-            <th>경기</th>
-            <th>승률</th>
-            <th>픽률</th>
-            <th>Avg KDA</th>
-            <th>평균 CS</th>
-            <th>티어 점수</th>
+            ${columns.map(([label, key]) => `<th scope="col"${key === activeTierSort ? ' class="is-sorted" aria-sort="descending"' : ""}>${label}</th>`).join("")}
           </tr>
         </thead>
         <tbody>
@@ -344,7 +341,12 @@ function renderChampionTiers() {
                 </div>
               </td>
               <td>${number(row.totalGames)}</td>
-              <td><strong>${row.winRate.toFixed(2)}%</strong></td>
+              <td>
+                <div class="win-rate-cell">
+                  <strong>${row.winRate.toFixed(2)}%</strong>
+                  <span class="win-rate-track" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, row.winRate))}%"></i></span>
+                </div>
+              </td>
               <td>${row.pickRate.toFixed(2)}%</td>
               <td>${row.averageKDA.toFixed(2)}</td>
               <td>${row.averageCS.toFixed(1)}</td>

@@ -5269,6 +5269,11 @@ html[data-theme="light"] {
   --theme-hero-start: #f8f9fb;
   --theme-hero-end: #eef1f4;
   --theme-grid: rgb(17 24 39 / 5%);
+  --theme-mint: #26765d;
+  --theme-gold: #906422;
+  --table-heading: #eef2f5;
+  --table-stripe: #f7f9fb;
+  --table-hover: #edf4f7;
   --dashboard-bg: var(--theme-bg);
   --dashboard-bg-soft: var(--theme-bg-elevated);
   --dashboard-panel: var(--theme-surface);
@@ -5286,34 +5291,39 @@ html[data-theme="light"] {
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --theme-bg: #14171b;
-  --theme-bg-elevated: #171b20;
-  --theme-surface: #1b2027;
-  --theme-surface-soft: #20262d;
-  --theme-surface-hover: #242b33;
-  --theme-text: #f4f6f7;
-  --theme-text-soft: #d8dde1;
-  --theme-muted: #9aa3ab;
-  --theme-line: #2c333b;
-  --theme-line-strong: #3a424c;
-  --theme-lime: #c9e94a;
-  --theme-lime-strong: #d6f45a;
-  --theme-lime-soft: rgb(201 233 74 / 10%);
-  --theme-blue: #5a91ed;
-  --theme-red: #ef6963;
-  --theme-header: rgb(20 23 27 / 88%);
-  --theme-shadow: 0 16px 42px rgb(0 0 0 / 22%);
-  --theme-shadow-hover: 0 22px 52px rgb(0 0 0 / 30%);
-  --theme-hero-start: #1b2026;
-  --theme-hero-end: #14181c;
+  --theme-bg: #28292d;
+  --theme-bg-elevated: #2d3034;
+  --theme-surface: #34373c;
+  --theme-surface-soft: #3b3f44;
+  --theme-surface-hover: #41474b;
+  --theme-text: #f3f4f0;
+  --theme-text-soft: #dce2df;
+  --theme-muted: #b3bdb9;
+  --theme-line: #4b5355;
+  --theme-line-strong: #66716e;
+  --theme-lime: #d1e78b;
+  --theme-lime-strong: #e0efac;
+  --theme-lime-soft: rgb(209 231 139 / 12%);
+  --theme-blue: #92baff;
+  --theme-red: #ff9994;
+  --theme-mint: #8ddfc4;
+  --theme-gold: #e9ca91;
+  --theme-header: rgb(45 47 51 / 96%);
+  --theme-shadow: 0 6px 18px rgb(15 18 18 / 14%);
+  --theme-shadow-hover: 0 8px 22px rgb(15 18 18 / 20%);
+  --theme-hero-start: #33453e;
+  --theme-hero-end: #2d3034;
   --theme-grid: rgb(255 255 255 / 4%);
+  --table-heading: #364740;
+  --table-stripe: #383d40;
+  --table-hover: #40504d;
   --dashboard-bg: var(--theme-bg);
   --dashboard-bg-soft: var(--theme-bg-elevated);
   --dashboard-panel: var(--theme-surface);
   --dashboard-panel-high: var(--theme-surface-soft);
   --dashboard-panel-hover: var(--theme-surface-hover);
   --dashboard-line: var(--theme-line);
-  --dashboard-line-soft: #252b32;
+  --dashboard-line-soft: #444b4d;
   --dashboard-text: var(--theme-text);
   --dashboard-muted: var(--theme-muted);
   --dashboard-lime: var(--theme-lime);
@@ -8223,6 +8233,55 @@ body { letter-spacing: 0; }
 .tier-table small, .table-champion span { font-size: 11px; }
 [role="tablist"] button:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--theme-blue); outline-offset: 3px; }
 
+/* Data surfaces keep colour tied to state and comparison, not decoration. */
+html[data-theme="dark"] .search-band { background: #303e38; border-bottom: 1px solid var(--theme-line); }
+html[data-theme="dark"] .search-box { box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+html[data-theme="dark"] .profile-rank-card,
+html[data-theme="dark"] .tft-rank { border-top: 2px solid var(--theme-mint); background: var(--theme-surface); }
+html[data-theme="dark"] .unranked-card { border-top-color: var(--theme-line-strong); background: var(--theme-bg-elevated); }
+html[data-theme="dark"] .match-card { --result-color: var(--theme-mint); background: var(--theme-surface); border-color: var(--theme-line); }
+html[data-theme="dark"] .match-card.loss { --result-color: var(--theme-red); }
+html[data-theme="dark"] .match-card:hover { background: var(--theme-surface-hover); border-color: var(--theme-line-strong); }
+html[data-theme="dark"] .match-meta { border-left: 2px solid var(--result-color); padding-left: 10px; }
+html[data-theme="dark"] .match-details { background: var(--theme-bg-elevated); }
+html[data-theme="dark"] .match-analysis-detail { background: transparent; }
+html[data-theme="dark"] .analysis-stat-card:nth-child(2) strong { color: var(--theme-mint); }
+html[data-theme="dark"] .analysis-stat-card:nth-child(3) strong { color: var(--theme-blue); }
+html[data-theme="dark"] .analysis-stat-card:nth-child(4) strong { color: var(--theme-gold); }
+html[data-theme="dark"] .tft-match-card.first { border-left-color: var(--theme-gold); }
+html[data-theme="dark"] .tft-match-card.top-four { border-left-color: var(--theme-mint); }
+html[data-theme="dark"] .tft-match-card.bottom-four { border-left-color: var(--theme-red); }
+html[data-theme="dark"] .playstyle-card,
+html[data-theme="dark"] .project-info { background: var(--theme-surface); }
+.tier-table-wrap { max-height: min(70vh, 680px); border: 1px solid var(--theme-line); border-radius: 6px; background: var(--theme-surface); }
+.tier-table { color: var(--theme-text); font-variant-numeric: tabular-nums; }
+.tier-table th { position: sticky; top: 0; z-index: 1; height: 46px; color: var(--theme-text-soft); background: var(--table-heading); border-color: var(--theme-line); font-weight: 700; white-space: nowrap; }
+.tier-table td { border-color: var(--theme-line); }
+.tier-table tbody tr:nth-child(even) { background: var(--table-stripe); }
+.tier-table tbody tr:hover { background: var(--table-hover); }
+.tier-table th.is-sorted { color: var(--theme-mint); box-shadow: inset 0 -2px 0 var(--theme-mint); }
+.tier-table th.is-sorted::after { content: "\2193"; margin-left: 5px; }
+.tier-table[data-sort="totalGames"] td:nth-child(4),
+.tier-table[data-sort="winRate"] td:nth-child(5),
+.tier-table[data-sort="pickRate"] td:nth-child(6),
+.tier-table[data-sort="averageKDA"] td:nth-child(7),
+.tier-table[data-sort="tierScore"] td:nth-child(9) { color: var(--theme-mint); background: color-mix(in srgb, var(--theme-mint) 6%, transparent); font-weight: 700; }
+.tier-table .table-champion { min-width: 0; }
+.table-champion img { border-radius: 5px; }
+.table-champion small { padding: 3px 6px; border: 1px solid var(--theme-line); border-radius: 4px; color: var(--theme-muted); background: var(--theme-surface-soft); white-space: normal; }
+.win-rate-cell { display: grid; justify-items: end; gap: 6px; }
+.win-rate-track { display: block; width: 64px; height: 3px; border-radius: 2px; background: var(--theme-line); overflow: hidden; }
+.win-rate-track i { display: block; height: 100%; background: var(--theme-mint); }
+.tier-table .grade-badge { border-radius: 4px; }
+html[data-theme="dark"] .grade-s { color: #f3dfa7; background: #645436; }
+html[data-theme="dark"] .grade-a { color: #b3ead6; background: #355749; }
+html[data-theme="dark"] .grade-b { color: #c3d7ff; background: #3e5271; }
+html[data-theme="dark"] .grade-c { color: #e0ceef; background: #594963; }
+html[data-theme="dark"] .grade-d,
+html[data-theme="dark"] .grade-na { color: #d9dfdc; background: #51595b; }
+.tier-meta span { border-radius: 4px; font-variant-numeric: tabular-nums; }
+.performance strong, .analysis-stat-card strong, .participant-kda { font-variant-numeric: tabular-nums; }
+
 @media (max-width: 768px) {
   .search-band { padding: 28px 0; }
   .search-inner h1 { font-size: 32px; }
@@ -8268,6 +8327,7 @@ body { letter-spacing: 0; }
   .table-champion { gap: 6px; flex-wrap: wrap; }
   .table-champion img { width: 28px; height: 28px; }
   .table-champion small { flex-basis: 100%; font-size: 10px; }
+  .win-rate-track { width: 40px; }
 }
 
 @media (max-width: 360px) {
