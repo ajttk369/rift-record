@@ -1,3 +1,6 @@
+import { getQueueType, rankSnapshotScore, createSafeStorage, isEarlyEnd, summarizeTft } from "./data-utils.js";
+
+const storage = createSafeStorage(() => window.localStorage);
 const form = document.querySelector("#search-form");
 const input = document.querySelector("#riot-id");
 const welcome = document.querySelector("#welcome");
@@ -18,8 +21,6 @@ const persistenceWarning = document.querySelector("#persistence-warning");
 const searchBand = document.querySelector("#search");
 const championTiers = document.querySelector("#champion-tiers");
 const championTierBoard = document.querySelector("#champion-tier-board");
-const seedButton = document.querySelector("#seed-button");
-const seedStatus = document.querySelector("#seed-status");
 const demoButton = document.querySelector("#demo-button");
 const demoBadge = document.querySelector("#demo-badge");
 const queueLabel = document.querySelector("#queue-label");
@@ -52,6 +53,14 @@ let tierData = null;
 let activeLane = "TOP";
 let activeGrade = "ALL";
 let activeTierSort = "tierScore";
+let selectedSearchGame = "lol";
+let searchRequestVersion = 0;
+let searchController;
+let tierRequestVersion = 0;
+let tierController;
+let tftController;
+let refreshTimer;
+const requestStatus = document.querySelector("#request-status");
 
 renderRecentSearches();
 renderFavoriteSearches();
@@ -67,16 +76,35 @@ form.addEventListener("submit", (event) => {
 });
 
 refreshButton.addEventListener("click", () => {
-  if (currentRiotId) search(currentRiotId);
+  if (currentData?.isDemo) showDemoData();
+  else if (currentRiotId) search(currentRiotId, { refresh: true, game: tftResults.hidden ? "lol" : "tft" });
 });
 
+document.querySelectorAll("[data-search-game]").forEach((button) => {
+  button.addEventListener("click", () => setSearchGame(button.dataset.searchGame));
+});
+document.querySelector("#share-button").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    requestStatus.textContent = "검색 결과 링크를 복사했습니다.";
+  } catch {
+    const field = document.querySelector("#share-link");
+    field.hidden = false;
+    field.value = location.href;
+    field.focus();
+    field.select();
+    requestStatus.textContent = "공유 주소를 선택했습니다.";
+  }
+});
+document.querySelectorAll("#tft-mode, #tft-set").forEach((select) => select.addEventListener("change", renderFilteredTft));
+
 clearRecentButton.addEventListener("click", () => {
-  localStorage.removeItem("rift-record-recent");
+  storage.removeItem("rift-record-recent");
   renderRecentSearches();
 });
 
 clearFavoriteButton.addEventListener("click", () => {
-  localStorage.removeItem("rift-record-favorites");
+  storage.removeItem("rift-record-favorites");
   renderFavoriteSearches();
   updateFavoriteButton();
 });
@@ -117,6 +145,7 @@ document.querySelectorAll(".filter-tabs button").forEach((button) => {
     button.classList.add("active");
     activeFilter = button.dataset.filter;
     matchesExpanded = false;
+    renderPersonalAnalysis(currentData);
     renderMatches(currentData);
   });
 });
@@ -144,9 +173,24 @@ document.querySelector("#tier-sort").addEventListener("change", (event) => {
   renderChampionTiers();
 });
 
-seedButton.addEventListener("click", seedChampionStats);
 demoButton.addEventListener("click", showDemoData);
 handleInitialQuery();
+
+document.querySelectorAll(".filter-tabs, .lane-tabs, .grade-tabs").forEach((group) => {
+  group.setAttribute("role", "group");
+  const sync = () => group.querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", String(button.classList.contains("active"))));
+  sync();
+  group.addEventListener("click", sync);
+});
+document.querySelector(".game-tabs").addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const buttons = [...event.currentTarget.querySelectorAll("[role='tab']")];
+  const index = buttons.indexOf(document.activeElement);
+  const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+  event.preventDefault();
+  buttons[next].focus();
+  buttons[next].click();
+});
 
 function toggleTheme() {
   const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -170,6 +214,13 @@ function syncThemeToggle() {
 }
 
 function showDemoData() {
+  searchRequestVersion += 1;
+  searchController?.abort();
+  tftController?.abort();
+  clearInterval(refreshTimer);
+  refreshButton.disabled = false;
+  document.querySelector("main").setAttribute("aria-busy", "false");
+  requestStatus.textContent = "샘플 데이터 · 실제 Riot 계정 기록이 아닙니다.";
   currentRiotId = "";
   championPerformanceExpanded = false;
   matchesExpanded = false;
@@ -188,34 +239,11 @@ function showDemoData() {
   currentTftData = null;
   tftLoadingPromise = null;
   tftRequestVersion += 1;
-  selectGameTab("lol");
-  history.replaceState(null, "", `${location.pathname}?demo=true`);
+  selectGameTab(selectedSearchGame);
+  history.replaceState(null, "", `/?demo=true&game=${selectedSearchGame}`);
   renderProfile(currentData);
   setView("results");
   results.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-async function seedChampionStats() {
-  seedButton.disabled = true;
-  seedStatus.hidden = false;
-  seedStatus.textContent = "Challenger 솔로랭크 표본을 소량 수집하는 중입니다.";
-
-  try {
-    const response = await fetch("/api/seed-champion-stats?players=1&matches=3&tier=challenger", {
-      method: "POST"
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "샘플 데이터 수집에 실패했습니다.");
-
-    seedStatus.textContent =
-      `수집 완료: 새 매치 ${number(data.newMatches)}개 저장, 전체 ${number(data.storedMatchesAfter)}개.`;
-    await fetch("/api/recalculate-champion-stats", { method: "POST" });
-    await loadChampionTiers();
-  } catch (error) {
-    seedStatus.textContent = error.message;
-  } finally {
-    seedButton.disabled = false;
-  }
 }
 
 async function handlePageRoute() {
@@ -236,14 +264,20 @@ async function handlePageRoute() {
 }
 
 async function loadChampionTiers() {
+  const version = ++tierRequestVersion;
+  const lane = activeLane;
+  tierController?.abort();
+  tierController = new AbortController();
   championTierBoard.innerHTML = '<div class="tier-board-loading">수집된 매치 데이터를 집계하는 중입니다.</div>';
   try {
-    const response = await fetch(`/api/champion-stats?position=${activeLane}`);
+    const response = await fetch(`/api/champion-stats?position=${lane}`, { signal: AbortSignal.any([tierController.signal, AbortSignal.timeout(45_000)]) });
     const data = await response.json();
+    if (version !== tierRequestVersion) return;
     if (!response.ok) throw new Error(data.error || "티어 통계를 불러오지 못했습니다.");
     tierData = data;
     renderChampionTiers();
   } catch (error) {
+    if (version !== tierRequestVersion || error.name === "AbortError") return;
     championTierBoard.innerHTML = `<div class="tier-board-loading">${escapeHtml(error.message)}</div>`;
   }
 }
@@ -258,18 +292,19 @@ function renderChampionTiers() {
 
   document.querySelector("#tier-sample-summary").innerHTML = `
     <strong>${number(tierData.collectedMatches)}</strong>개 매치 수집
-    <span>${activeLane} 표본 ${number(tierData.positionSamples)}개 · 최소 산정 표본 ${tierData.minimumSample}경기</span>
+    <span>${activeLane} 참가 기록 ${number(tierData.positionSamples)}개 · 최근 ${tierData.windowDays || 28}일 · 솔로랭크</span>
+    <small>${tierData.eligibleChampions >= 10 ? "챔피언별 최소 10경기" : "비교 가능한 챔피언 10개 미만 · 등급 산정 보류"}</small>
   `;
 
   const rows = tierData.champions
     .filter((row) => activeGrade === "ALL" || row.tierGrade === activeGrade)
-    .sort((a, b) => b[activeTierSort] - a[activeTierSort]);
+    .sort((a, b) => Number(a.lowSample) - Number(b.lowSample) || b[activeTierSort] - a[activeTierSort]);
 
   if (!rows.length) {
     championTierBoard.innerHTML = `
       <div class="tier-empty">
-        <strong>아직 충분한 매치 데이터가 쌓이지 않았어요.</strong>
-        <span>Riot ID를 검색하면 분석 데이터가 저장되고, 챔피언 티어표가 점점 업데이트됩니다.</span>
+        <strong>${tierData.champions.length ? "선택한 등급에 해당하는 챔피언이 없습니다." : "현재 패치의 솔로랭크 표본이 아직 없습니다."}</strong>
+        <span>${tierData.champions.length ? "다른 등급이나 전체 필터를 선택해 주세요." : "최근 28일의 5분 이상 경기를 기준으로 집계합니다."}</span>
       </div>
     `;
     return;
@@ -323,32 +358,51 @@ function renderChampionTiers() {
   `;
 }
 
-async function search(rawRiotId) {
+async function search(rawRiotId, { game = selectedSearchGame, refresh = false } = {}) {
   const parsed = parseRiotId(rawRiotId);
   if (!parsed) {
     showError("Riot ID는 게임이름#태그 형식으로 입력해주세요. 예: Hide on bush#KR1");
     return;
   }
 
-  currentRiotId = `${parsed.gameName} #${parsed.tagLine}`;
-  input.value = currentRiotId;
-  setView("loading");
+  const version = ++searchRequestVersion;
+  clearInterval(refreshTimer);
+  searchController?.abort();
+  tftController?.abort();
+  searchController = new AbortController();
+  tftRequestVersion += 1;
+  tftLoadingPromise = null;
+  setSearchGame(game);
+  input.value = `${parsed.gameName} #${parsed.tagLine}`;
+  refreshButton.disabled = true;
+  requestStatus.textContent = `${game === "tft" ? "TFT" : "LoL"} 전적을 조회하고 있습니다.`;
+  document.querySelector("main").setAttribute("aria-busy", "true");
+  if (!refresh || !currentData) setView("loading");
 
   try {
     const params = new URLSearchParams(parsed);
-    const response = await fetch(`/api/summoner?${params}`);
+    if (refresh) params.set("refresh", "1");
+    const response = await fetch(`/api/${game === "tft" ? "tft" : "summoner"}?${params}`, {
+      signal: AbortSignal.any([searchController.signal, AbortSignal.timeout(45_000)])
+    });
     const data = await parseJsonResponse(response);
+    if (version !== searchRequestVersion) return;
 
     if (!response.ok) {
       throw new Error(getFriendlyError(response.status, data?.error));
     }
 
-    currentData = data;
-    currentData.rankTracking = updateRankSnapshots(data);
-    currentTftData = null;
+    if (!data?.account || (game === "lol" && !Array.isArray(data.matches)) || (game === "tft" && !Array.isArray(data.tftMatches))) {
+      throw new Error("전적 응답을 확인할 수 없습니다. 다시 시도해 주세요.");
+    }
+    currentRiotId = `${data.account.gameName} #${data.account.tagLine}`;
+    currentData = game === "tft"
+      ? { account: data.account, summoner: data.tftSummoner || {}, ddragonVersion: data.ddragonVersion, isTftOnly: true }
+      : data;
+    if (game === "lol") currentData.rankTracking = updateRankSnapshots(data);
+    currentTftData = game === "tft" ? data : null;
     tftLoadingPromise = null;
     tftRequestVersion += 1;
-    selectGameTab("lol");
     championPerformanceExpanded = false;
     matchesExpanded = false;
     resetDetailedAnalysis();
@@ -365,15 +419,59 @@ async function search(rawRiotId) {
     history.replaceState(
       null,
       "",
-      `/?riotId=${encodeURIComponent(data.account.gameName)}&tag=${encodeURIComponent(data.account.tagLine)}`
+      `/?riotId=${encodeURIComponent(data.account.gameName)}&tag=${encodeURIComponent(data.account.tagLine)}&game=${game}`
     );
 
-    renderProfile(data);
+    if (game === "lol") renderProfile(data);
+    else {
+      renderTftProfile(data);
+      resetTftFilters(data);
+      tftLoading.hidden = true;
+      tftError.hidden = true;
+      tftContent.hidden = false;
+    }
+    selectGameTab(game);
+    updateFavoriteButton();
     setView("results");
-    results.scrollIntoView({ behavior: "smooth", block: "start" });
+    requestStatus.textContent = data.cached ? "저장된 최신 조회 결과를 표시합니다." : "";
+    setRefreshCooldown(data.refreshAfterSeconds || 0);
+    if (!refresh) results.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   } catch (error) {
-    showError(error.message || "전적을 불러오는 중 문제가 발생했습니다.");
+    if (version !== searchRequestVersion || error.name === "AbortError") return;
+    const message = error.name === "TimeoutError" ? "조회 시간이 길어지고 있습니다. 잠시 후 다시 시도해 주세요." : error.message;
+    showError(message || "전적을 불러오는 중 문제가 발생했습니다.");
+    if (refresh && currentData) {
+      setView("results");
+      errorPanel.hidden = false;
+    }
+    requestStatus.textContent = "";
+    refreshButton.disabled = false;
+  } finally {
+    if (version === searchRequestVersion) document.querySelector("main").setAttribute("aria-busy", "false");
   }
+}
+
+function setSearchGame(game) {
+  selectedSearchGame = game === "tft" ? "tft" : "lol";
+  document.querySelectorAll("[data-search-game]").forEach((button) => {
+    const selected = button.dataset.searchGame === selectedSearchGame;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+
+function setRefreshCooldown(seconds) {
+  clearInterval(refreshTimer);
+  const until = Date.now() + seconds * 1000;
+  const update = () => {
+    const remaining = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    refreshButton.disabled = remaining > 0;
+    refreshButton.title = remaining ? `${remaining}초 후 새로고침 가능` : "전적 새로고침";
+    refreshButton.setAttribute("aria-label", refreshButton.title);
+    if (!remaining) clearInterval(refreshTimer);
+  };
+  update();
+  if (seconds) refreshTimer = setInterval(update, 1000);
 }
 
 function parseRiotId(value) {
@@ -383,7 +481,7 @@ function parseRiotId(value) {
 
   const gameName = normalized.slice(0, separator).trim();
   const tagLine = normalized.slice(separator + 1).trim();
-  return gameName && tagLine ? { gameName, tagLine } : null;
+  return gameName && tagLine && gameName.length <= 64 && tagLine.length <= 16 && !/[\u0000-\u001f\u007f]/.test(normalized) ? { gameName, tagLine } : null;
 }
 
 function setView(view) {
@@ -396,6 +494,8 @@ function setView(view) {
   loading.hidden = view !== "loading";
   errorPanel.hidden = view !== "error";
   results.hidden = view !== "results";
+  document.querySelector("#result-caption").textContent = currentData?.isDemo ? "샘플 전적" : currentRiotId;
+  document.querySelector("#share-link").hidden = true;
 }
 
 function resetDetailedAnalysis() {
@@ -427,8 +527,9 @@ function renderProfile(data) {
   document.querySelector("#updated-at").textContent =
     `${formatRelativeTime(new Date(updatedAt).getTime())} 업데이트`;
 
-  persistenceWarning.hidden = !data.persistenceWarning;
-  persistenceWarning.textContent = data.persistenceWarning || "";
+  const warnings = [data.persistenceWarning, data.rankWarning].filter(Boolean).join(" ");
+  persistenceWarning.hidden = !warnings;
+  persistenceWarning.textContent = warnings;
 
   updateFavoriteButton();
 
@@ -439,6 +540,11 @@ function renderProfile(data) {
 }
 
 function selectGameTab(tab) {
+  if (tab === "lol" && currentData?.isTftOnly) {
+    search(currentRiotId, { game: "lol" });
+    return;
+  }
+  setSearchGame(tab);
   const showTft = tab === "tft";
   lolResults.hidden = showTft;
   tftResults.hidden = !showTft;
@@ -447,7 +553,14 @@ function selectGameTab(tab) {
     const active = button.dataset.gameTab === tab;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
   });
+
+  if (currentData && location.pathname !== "/champions") {
+    const url = new URL(location.href);
+    url.searchParams.set("game", tab);
+    history.replaceState(null, "", url.pathname + url.search);
+  }
 
   if (showTft && !currentTftData) {
     loadTftData();
@@ -462,17 +575,19 @@ async function loadTftData(force = false) {
   tftError.hidden = true;
   tftContent.hidden = true;
   const requestVersion = ++tftRequestVersion;
+  const accountData = currentData;
+  tftController?.abort();
+  tftController = new AbortController();
 
   tftLoadingPromise = (async () => {
     try {
       const data = currentData.isDemo
         ? createDemoTftData(currentData)
-        : await fetchTftData();
+        : await fetchTftData(accountData.account, force, tftController.signal);
       if (requestVersion !== tftRequestVersion) return;
       currentTftData = data;
       renderTftProfile(data);
-      renderTftSummary(data);
-      renderTftMatches(data.tftMatches);
+      resetTftFilters(data);
       tftLoading.hidden = true;
       tftContent.hidden = false;
     } catch (error) {
@@ -490,18 +605,19 @@ async function loadTftData(force = false) {
   return tftLoadingPromise;
 }
 
-async function fetchTftData() {
+async function fetchTftData(account, refresh = false, signal) {
   const params = new URLSearchParams({
-    gameName: currentData.account.gameName,
-    tagLine: currentData.account.tagLine,
-    puuid: currentData.account.puuid
+    gameName: account.gameName,
+    tagLine: account.tagLine
   });
-  const response = await fetch(`/api/tft?${params}`);
+  if (refresh) params.set("refresh", "1");
+  const response = await fetch(`/api/tft?${params}`, { signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)].filter(Boolean)) });
   const data = await parseJsonResponse(response);
 
   if (!response.ok) {
     throw new Error(getFriendlyError(response.status, data?.error));
   }
+  if (!data?.account || !Array.isArray(data.tftMatches)) throw new Error("TFT 응답을 확인할 수 없습니다.");
   return data;
 }
 
@@ -509,7 +625,7 @@ function renderTftProfile(data) {
   const summoner = data.tftSummoner;
   const profileIconId = summoner?.profileIconId ?? currentData?.summoner?.profileIconId;
   const profileIcon = document.querySelector("#tft-profile-icon");
-  profileIcon.src = ddragonUrl(currentData.ddragonVersion, `img/profileicon/${profileIconId}.png`);
+  profileIcon.src = ddragonUrl(data.ddragonVersion || currentData.ddragonVersion, `img/profileicon/${profileIconId ?? 29}.png`);
   profileIcon.alt = `${currentData.account.gameName} TFT 프로필 아이콘`;
   document.querySelector("#tft-level").textContent =
     summoner?.level || currentData?.summoner?.level || "-";
@@ -547,11 +663,10 @@ function renderTftProfile(data) {
 
 function renderTftSummary(data) {
   const summary = data.tftSummary;
-  const rank = data.tftRank;
   const cards = [
     ["평균 등수", summary.games ? `${Number(summary.averagePlacement).toFixed(1)}등` : "-", "avg"],
-    ["Top 4", `${number(summary.topFourRate)}%`, "top4"],
-    ["1등", `${number(summary.firstPlaces)}회`, "first"],
+    ["Top 4", !data.doubleUp && summary.games ? `${number(summary.topFourRate)}%` : "-", "top4"],
+    ["1등", summary.games ? `${number(summary.firstPlaces)}회` : "-", "first"],
     ["평균 레벨", summary.games ? Number(summary.averageLevel).toFixed(1) : "-", "level"],
     ["주요 특성", summary.mostTrait || "-", "trait"],
     ["주요 유닛", summary.mostUnit || "-", "unit"]
@@ -559,13 +674,6 @@ function renderTftSummary(data) {
 
   document.querySelector("#tft-summary").innerHTML = `
     <div class="tft-summary-overview">
-      <article class="tft-season-card">
-        <span>RANKED TFT</span>
-        <strong>${rank ? escapeHtml(`${capitalize(rank.tier)} ${rank.rank}`) : "Unranked"}</strong>
-        <p>${rank
-          ? `${number(rank.leaguePoints)} LP · ${number(rank.wins)}승 ${number(rank.losses)}패`
-          : "이번 시즌 랭크 정보 없음"}</p>
-      </article>
       <div class="tft-summary-metrics">
         ${cards.map(([label, value, type]) => `
           <article class="metric-${type}"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>
@@ -580,7 +688,7 @@ function renderTftSummary(data) {
       <article class="tft-placement-trend">
         <div>
           <span>최근 등수 추이</span>
-          <strong>낮을수록 좋은 기록</strong>
+          <strong>과거 → 최근 · 낮을수록 좋은 기록</strong>
         </div>
         ${renderTftPlacementChart(data.tftMatches)}
       </article>
@@ -597,13 +705,46 @@ function renderTftMatches(matches) {
     button.addEventListener("click", () => {
       const card = button.closest(".tft-match-card");
       const isOpen = card.classList.toggle("is-expanded");
+      if (isOpen && !card.dataset.loaded) {
+        card.querySelector(".tft-match-details").innerHTML = tftMatchDetailTable(matches[Number(card.dataset.index)]);
+        card.dataset.loaded = "true";
+      }
       button.setAttribute("aria-expanded", String(isOpen));
       button.querySelector("span").textContent = isOpen ? "접기" : "상세";
     });
   });
 }
 
-function tftMatchCard(match) {
+function resetTftFilters(data) {
+  const sets = [...new Set(data.tftMatches.map((match) => match.setNumber).filter(Boolean))];
+  document.querySelector("#tft-mode").value = "all";
+  document.querySelector("#tft-set").innerHTML = '<option value="all">전체 세트</option>' + sets.map((set) => `<option value="${Number(set)}">세트 ${Number(set)}</option>`).join("");
+  renderFilteredTft();
+}
+
+function tftMode(match) {
+  return match.queueId === 1100 ? "ranked" : match.queueId === 1090 ? "normal" : match.queueId === 1160 ? "double" : "other";
+}
+
+function renderFilteredTft() {
+  if (!currentTftData) return;
+  const mode = document.querySelector("#tft-mode").value;
+  const set = document.querySelector("#tft-set").value;
+  const matches = currentTftData.tftMatches.filter((match) => (mode === "all" || tftMode(match) === mode) && (set === "all" || String(match.setNumber) === set));
+  const standard = matches.filter((match) => [1090, 1100].includes(match.queueId));
+  const doubleUp = mode === "double";
+  const analyzed = doubleUp ? matches : standard;
+  const summary = summarizeTft(analyzed);
+  const dates = matches.map((match) => match.gameDatetime).filter(Boolean).sort((a, b) => a - b);
+  const period = dates.length ? `${new Date(dates[0]).toLocaleDateString("ko-KR")} ~ ${new Date(dates.at(-1)).toLocaleDateString("ko-KR")}` : "해당 조건의 경기 없음";
+  document.querySelector("#tft-period").textContent = `${period} · ${matches.length}경기${mode === "all" ? " · 요약은 일반·랭크 경기 기준" : doubleUp ? " · 팀전 모드로 Top 4 지표 미적용" : mode === "other" ? " · 별도 규칙 모드로 요약 지표 미적용" : ""}`;
+  document.querySelector(".tft-summary-section h2").textContent = `선택한 ${summary.games}경기 요약`;
+  renderTftSummary({ ...currentTftData, tftMatches: analyzed, tftSummary: summary, doubleUp });
+  renderTftMatches(matches);
+}
+
+function tftMatchCard(match, index) {
+  const standardMode = [1090, 1100].includes(match.queueId);
   const placementClass = match.placement === 1
     ? "first"
     : match.placement <= 4 ? "top-four" : "bottom-four";
@@ -627,20 +768,17 @@ function tftMatchCard(match) {
       </span>
     `).join("")
     : '<span class="tft-empty-chip">증강체 정보 없음</span>';
-  const detailedUnits = match.units.length
-    ? match.units.map(tftDetailedUnit).join("")
-    : '<span class="tft-empty-chip">유닛 정보 없음</span>';
-
   return `
-    <article class="tft-match-card tft-match-card-compact ${placementClass}">
+    <article class="tft-match-card tft-match-card-compact ${placementClass}" data-index="${index}">
       <div class="tft-compact-main">
         <div class="tft-placement">
           ${companion}
           <strong>${match.placement}</strong><span>등</span>
-          <b>${match.placement <= 4 ? "TOP 4" : "BOTTOM 4"}</b>
+          <b>${standardMode ? match.placement <= 4 ? "TOP 4" : "BOTTOM 4" : "최종 순위"}</b>
         </div>
         <div class="tft-match-meta">
           <strong>${escapeHtml(tftQueueLabel(match.queueId, match.gameType))}</strong>
+          <span>세트 ${number(match.setNumber)}</span>
           <span>${formatRelativeTime(match.gameDatetime)}</span>
           <span>${formatDuration(Math.round(match.gameLength))}</span>
           <div><b>Lv.${match.level}</b><b>라운드 ${escapeHtml(formatTftRound(match.lastRound))}</b></div>
@@ -660,7 +798,6 @@ function tftMatchCard(match) {
         </div>
       </div>
       <div class="tft-match-details">
-        ${tftMatchDetailTable(match)}
       </div>
     </article>
   `;
@@ -895,7 +1032,7 @@ function tftQueueLabel(queueId, gameType) {
 
 function formatTftRound(round) {
   if (!round) return "-";
-  return `${Math.floor(round / 10)}-${round % 10}`;
+  return `${number(round)}회차`;
 }
 
 function formatTftElimination(seconds) {
@@ -932,6 +1069,7 @@ function getFriendlyError(status, serverMessage) {
 }
 
 function renderPersonalAnalysis(data) {
+  if (!data || data.isTftOnly) return;
   const analysis = analyzePlayerMatches(data);
   currentAnalysis = analysis;
 
@@ -948,7 +1086,8 @@ function renderPersonalAnalysis(data) {
 }
 
 function analyzePlayerMatches(data) {
-  const games = data.matches.map((match, index) => {
+  const selected = data.matches.filter((match) => activeFilter === "all" || getQueueType(match.info.queueId).category === activeFilter);
+  const games = selected.filter((match) => !isEarlyEnd(match)).map((match, index) => {
     const player = getCurrentParticipant(match, data.account);
 
     if (!player) {
@@ -987,7 +1126,9 @@ function analyzePlayerMatches(data) {
       cs,
       csPerMinute: cs / durationMinutes,
       visionScore: player.visionScore || 0,
+      visionPerMinute: (player.visionScore || 0) / durationMinutes,
       damage: player.totalDamageDealtToChampions || 0,
+      damagePerMinute: (player.totalDamageDealtToChampions || 0) / durationMinutes,
       gold: player.goldEarned || 0,
       duration: match.info.gameDuration
     };
@@ -1013,6 +1154,13 @@ function analyzePlayerMatches(data) {
   const positionStats = aggregatePersonalStats(games, "position");
   const mostChampion = championStats[0]?.name || "-";
   const mainPosition = positionStats[0]?.name || "-";
+  const comparable = games.filter((game) => [400, 420, 430, 440, 490].includes(game.match.info.queueId) && game.position !== "UNKNOWN");
+  const comparisonAverages = Object.fromEntries(Object.keys(averages).map((key) => [key, avg(comparable, key)]));
+  comparisonAverages.winRate = comparable.length ? comparable.filter((game) => game.win).length / comparable.length * 100 : 0;
+  comparisonAverages.visionPerMinute = avg(comparable, "visionPerMinute");
+  comparisonAverages.damagePerMinute = avg(comparable, "damagePerMinute");
+  const comparisonPosition = aggregatePersonalStats(comparable, "position")[0]?.name || "UNKNOWN";
+  const enough = comparable.length >= 5;
 
   return {
     games,
@@ -1022,10 +1170,18 @@ function analyzePlayerMatches(data) {
     positionStats,
     mostChampion,
     mainPosition,
-    playstyle: classifyPlaystyle(averages),
+    selectedCount: selected.length,
+    excludedCount: selected.length - games.length,
+    comparisonCount: comparable.length,
+    recommendationStats: aggregatePersonalStats(comparable.filter((game) => game.position === comparisonPosition), "championName"),
+    playstyle: enough ? classifyPlaystyle(comparisonAverages) : {
+      type: "분석 표본 부족",
+      description: "같은 필터의 소환사의 협곡 기록이 5경기 이상일 때 플레이 경향을 분석합니다.",
+      metrics: [["비교 가능한 경기", `${comparable.length}경기`], ["최소 표본", "5경기"]]
+    },
     bestMatch: selectHighlight(games, true),
     worstMatch: selectHighlight(games, false),
-    tips: createImprovementTips(averages)
+    tips: enough ? createImprovementTips(comparisonAverages, comparisonPosition) : ["충분한 소환사의 협곡 기록이 쌓인 후 개선 포인트를 제공합니다."]
   };
 }
 
@@ -1074,9 +1230,9 @@ function aggregatePersonalStats(games, key) {
 }
 
 function classifyPlaystyle(averages) {
-  if (averages.visionScore >= 35) {
+  if (averages.visionPerMinute >= 1.5) {
     return {
-      type: "Vision Support Type",
+      type: "시야·지원 중심",
       description: "시야 확보와 팀 지원에 강점을 보이는 플레이 스타일입니다.",
       metrics: [
         ["평균 시야", averages.visionScore.toFixed(1)],
@@ -1086,9 +1242,9 @@ function classifyPlaystyle(averages) {
     };
   }
 
-  if (averages.killParticipation >= 65 && averages.damage >= 22000) {
+  if (averages.killParticipation >= 65 && averages.damagePerMinute >= 700) {
     return {
-      type: "Aggressive Carry Type",
+      type: "교전·피해량 중심",
       description: "교전에 적극적으로 참여하며 높은 피해량으로 흐름을 만드는 스타일입니다.",
       metrics: [
         ["킬 관여율", `${averages.killParticipation.toFixed(0)}%`],
@@ -1100,7 +1256,7 @@ function classifyPlaystyle(averages) {
 
   if (averages.csPerMinute >= 7 && averages.deaths <= 4.5) {
     return {
-      type: "Stable Farming Type",
+      type: "안정적인 성장 중심",
       description: "안정적인 성장과 자원 수급을 우선하는 플레이 스타일입니다.",
       metrics: [
         ["평균 CS/분", averages.csPerMinute.toFixed(1)],
@@ -1112,7 +1268,7 @@ function classifyPlaystyle(averages) {
 
   if (averages.assists >= averages.kills * 1.4 && averages.killParticipation >= 55) {
     return {
-      type: "Teamfight Focused Type",
+      type: "팀 교전 중심",
       description: "팀 교전 합류와 연계 플레이에서 기여도가 높은 스타일입니다.",
       metrics: [
         ["평균 어시스트", averages.assists.toFixed(1)],
@@ -1126,10 +1282,10 @@ function classifyPlaystyle(averages) {
     averages.kda >= 3 &&
     averages.csPerMinute >= 6 &&
     averages.killParticipation >= 50 &&
-    averages.damage >= 16000
+    averages.damagePerMinute >= 500
   ) {
     return {
-      type: "All-rounder Type",
+      type: "균형 잡힌 플레이",
       description: "성장, 교전, 팀 기여가 고르게 나타나는 균형 잡힌 스타일입니다.",
       metrics: [
         ["평균 KDA", averages.kda.toFixed(2)],
@@ -1140,8 +1296,8 @@ function classifyPlaystyle(averages) {
   }
 
   return {
-    type: "Objective-Oriented Type",
-    description: "무리한 교전보다 안정적인 운영과 경기 흐름을 중시하는 스타일입니다.",
+    type: "뚜렷한 경향 없음",
+    description: "최근 지표만으로 특정 플레이 경향을 판단하기 어렵습니다.",
     metrics: [
       ["최근 승률", `${averages.winRate.toFixed(0)}%`],
       ["평균 골드", number(Math.round(averages.gold))],
@@ -1169,17 +1325,17 @@ function selectHighlight(games, best) {
   )[0];
 }
 
-function createImprovementTips(averages) {
+function createImprovementTips(averages, position) {
   const tips = [];
 
   if (averages.deaths >= 6) {
     tips.push("데스가 많은 편이라 교전 전 시야 확보와 포지션 조절을 조금 더 의식하면 좋아요.");
   }
-  if (averages.csPerMinute < 5.5) {
-    tips.push("CS 수급이 낮은 편이라 라인전 이후 사이드 관리나 정글 캠프 활용을 점검해보세요.");
+  if (position !== "SUPPORT" && averages.csPerMinute < 5.5) {
+    tips.push(`평균 CS/분 ${averages.csPerMinute.toFixed(1)}입니다. 성장 흐름과 자원 수급 타이밍을 점검해보세요.`);
   }
-  if (averages.visionScore < 18) {
-    tips.push("시야 점수가 낮은 편이라 제어 와드와 렌즈 활용을 늘리면 팀 운영에 도움이 됩니다.");
+  if (averages.visionPerMinute < (position === "SUPPORT" ? 1.2 : .5)) {
+    tips.push(`평균 시야/분 ${averages.visionPerMinute.toFixed(1)}입니다. 와드 배치와 시야 제거 타이밍을 점검해보세요.`);
   }
   if (averages.killParticipation < 45) {
     tips.push("팀 교전 참여율이 낮은 편이라 오브젝트 타이밍의 합류를 의식해보세요.");
@@ -1198,18 +1354,20 @@ function createImprovementTips(averages) {
 }
 
 function renderAnalysisSummary(analysis, data) {
+  document.querySelector("#analysis-summary-title").textContent = activeFilter === "all" ? "전체 경기 요약" : `${document.querySelector(`.filter-tabs button[data-filter="${activeFilter}"]`).dataset.label || "선택한 경기"} 요약`;
+  document.querySelector("#analysis-scope").textContent = `${analysis.count}경기 기준${analysis.excludedCount ? ` · 다시하기·조기 종료 ${analysis.excludedCount}경기 제외` : ""}`;
   const cards = [
     ["최근 승률", `${analysis.averages.winRate.toFixed(0)}%`],
     ["평균 KDA", analysis.averages.kda.toFixed(2)],
     ["평균 킬 관여율", `${analysis.averages.killParticipation.toFixed(0)}%`],
-    ["평균 CS", number(Math.round(analysis.averages.cs))],
+    ["평균 CS/분", analysis.averages.csPerMinute.toFixed(1)],
     ["주 포지션", positionLabel(analysis.mainPosition)]
   ];
 
   document.querySelector("#analysis-summary").innerHTML = cards.map(([label, value]) => `
     <article class="analysis-stat-card">
       <span>${label}</span>
-      <strong>${escapeHtml(value)}</strong>
+      <strong>${analysis.count ? escapeHtml(value) : "-"}</strong>
     </article>
   `).join("");
 }
@@ -1220,7 +1378,7 @@ function renderPlaystyle(analysis) {
   document.querySelector("#playstyle-analysis").innerHTML = `
     <article class="playstyle-card">
       <div>
-        <span>PLAYSTYLE</span>
+        <span>협곡 ${analysis.comparisonCount}경기 · 규칙 기반 참고 분석</span>
         <h3>${escapeHtml(style.type)}</h3>
         <p>${escapeHtml(style.description)}</p>
       </div>
@@ -1285,13 +1443,13 @@ function renderChampionPerformance(analysis, data) {
         </div>
         <div class="personal-tier-link ${tier ? "" : "unavailable"}">
           ${tier ? `
-            <span>Rift Record Tier</span>
+            <span>수집 표본 티어</span>
             <strong>${tier.tierGrade === "N/A" ? "—" : tier.tierGrade}</strong>
             <small>점수 ${tier.tierScore.toFixed(1)} · ${tier.position}</small>
           ` : `
-            <span>Rift Record Tier</span>
+            <span>수집 표본 티어</span>
             <strong>—</strong>
-            <small>Tier data not available</small>
+            <small>현재 패치 표본 부족</small>
           `}
         </div>
       </article>
@@ -1319,6 +1477,7 @@ async function loadPersonalTierStats(analysis, data) {
       })
     );
 
+    if (currentData !== data || currentAnalysis !== analysis) return;
     personalTierStats = new Map();
 
     for (const [position, rows] of responses) {
@@ -1338,7 +1497,7 @@ async function loadPersonalTierStats(analysis, data) {
 }
 
 function renderRecommendedPicks(analysis, data) {
-  const eligible = analysis.championStats.filter((stat) => stat.games >= 2);
+  const eligible = analysis.recommendationStats.filter((stat) => stat.games >= 3);
   const maxDamage = Math.max(...eligible.map((stat) => stat.avgDamage), 1);
 
   const picks = eligible.map((stat) => {
@@ -1372,7 +1531,7 @@ function renderRecommendedPicks(analysis, data) {
         ${pick.games < 3 ? '<b>Low Sample</b>' : ""}
       </article>
     `).join("")
-    : '<p class="analysis-empty">추천에 필요한 챔피언별 2경기 이상의 표본이 없습니다.</p>';
+    : '<p class="analysis-empty">주 포지션에서 챔피언별 3경기 이상 플레이하면 추천을 제공합니다.</p>';
 }
 
 function recommendedReason(pick) {
@@ -1410,38 +1569,40 @@ function renderPositionPerformance(analysis) {
 }
 
 function renderRecentTrends(analysis) {
+  const chronological = [...analysis.games].reverse();
   const maxKda = Math.max(...analysis.games.map((game) => game.kda), 1);
   const maxCs = Math.max(...analysis.games.map((game) => game.csPerMinute), 1);
 
   document.querySelector("#recent-trends").innerHTML = `
     <div class="trend-row">
       <span>승패</span>
-      <div class="result-trend">${analysis.games.map((game) => `<b class="${game.win ? "win" : "loss"}">${game.win ? "W" : "L"}</b>`).join("")}</div>
+      <div class="result-trend">${chronological.map((game) => `<b class="${game.win ? "win" : "loss"}">${game.win ? "W" : "L"}</b>`).join("")}</div>
     </div>
     <div class="trend-row">
       <span>KDA</span>
-      <div class="bar-trend">${analysis.games.map((game) => `<i style="height:${Math.max(8, (game.kda / maxKda) * 100)}%" title="${game.kda.toFixed(2)} KDA"></i>`).join("")}</div>
+      <div class="bar-trend">${chronological.map((game) => `<i style="height:${Math.max(8, (game.kda / maxKda) * 100)}%" title="${game.kda.toFixed(2)} KDA"></i>`).join("")}</div>
     </div>
     <div class="trend-row">
       <span>CS/분</span>
-      <div class="bar-trend cs">${analysis.games.map((game) => `<i style="height:${Math.max(8, (game.csPerMinute / maxCs) * 100)}%" title="${game.csPerMinute.toFixed(1)} CS/분"></i>`).join("")}</div>
+      <div class="bar-trend cs">${chronological.map((game) => `<i style="height:${Math.max(8, (game.csPerMinute / maxCs) * 100)}%" title="${game.csPerMinute.toFixed(1)} CS/분"></i>`).join("")}</div>
     </div>
+    <p class="scope-note">과거 → 최근 · ${analysis.count}경기</p>
   `;
 }
 
 function renderImprovementTips(analysis) {
   document.querySelector("#improvement-tips").innerHTML = analysis.tips.map((tip, index) => `
-    <article><strong>0${index + 1}</strong><p>${escapeHtml(tip)}</p><span>최근 ${analysis.count}경기 기준</span></article>
+    <article><strong>0${index + 1}</strong><p>${escapeHtml(tip)}</p><span>협곡 ${analysis.comparisonCount}경기 기준 · 참고 의견</span></article>
   `).join("");
 }
 
 function championPerformanceTag(stat) {
   if (stat.games < 3) return "표본 부족";
-  if (stat.winRate >= 60) return "Best Pick";
-  if (stat.avgKDA >= 4) return "High KDA";
-  if (stat.winRate < 40) return "Low Win Rate";
-  if (stat.avgDeaths <= 4 && stat.avgKDA >= 2.5) return "Stable Pick";
-  return "Developing";
+  if (stat.winRate >= 60) return "높은 승률";
+  if (stat.avgKDA >= 4) return "높은 KDA";
+  if (stat.winRate < 40) return "낮은 승률";
+  if (stat.avgDeaths <= 4 && stat.avgKDA >= 2.5) return "안정적";
+  return "성장 중";
 }
 
 function normalizePlayerPosition(position) {
@@ -1497,8 +1658,8 @@ function renderRank(entries) {
       return `
         <article class="profile-rank-card unranked-card">
           <span>${label}</span>
-          <strong>Unranked</strong>
-          <small>이번 시즌 기록 없음</small>
+          <strong>${currentData?.rankWarning ? "조회 지연" : "Unranked"}</strong>
+          <small>${currentData?.rankWarning ? "잠시 후 다시 조회해 주세요" : "이번 시즌 기록 없음"}</small>
         </article>
       `;
     }
@@ -1522,11 +1683,19 @@ function renderRank(entries) {
             <strong>${escapeHtml(tierLabel)}</strong>
             <small>${number(entry.leaguePoints)} LP</small>
             <p>${number(entry.wins)}승 ${number(entry.losses)}패 · 승률 ${winRate}%</p>
+            ${rankChangeNote(queueType)}
           </div>
         </div>
       </article>
     `;
   }).join("");
+}
+
+function rankChangeNote(queueType) {
+  const tracking = currentData?.rankTracking?.[queueType];
+  if (!tracking || tracking.status !== "tracked") return "";
+  const since = new Date(tracking.previousUpdatedAt).toLocaleString("ko-KR");
+  return `<p class="rank-change-note" title="${escapeHtml(since)} 조회와 비교">이전 조회 대비 ${tracking.delta > 0 ? "+" : ""}${number(tracking.delta)} LP <small>${escapeHtml(since)}</small></p>`;
 }
 
 function renderMasteries(data) {
@@ -1602,6 +1771,7 @@ function updateMatchFilterCounts(matches = []) {
     if (!filter) return;
     button.dataset.label ||= button.textContent.trim();
     const count = counts[filter] || 0;
+    button.setAttribute("aria-pressed", String(filter === activeFilter));
     button.innerHTML = `<span>${escapeHtml(button.dataset.label)}</span><b>${count}</b>`;
   });
 }
@@ -1628,7 +1798,7 @@ function matchCard(match, data) {
     ? ((player.kills + player.assists) / player.deaths).toFixed(2)
     : "Perfect";
 
-  const result = player.win ? "승리" : "패배";
+  const result = isEarlyEnd(match) ? "조기 종료" : player.win ? "승리" : "패배";
   const resultClass = player.win ? "win" : "loss";
   const gameCreated = match.info.gameCreation || match.info.gameStartTimestamp;
   const lpBadge = renderLpTrackingBadge(match, data, queue);
@@ -1650,10 +1820,10 @@ function matchCard(match, data) {
           </div>
           <div class="kda">
             <strong>${player.kills} / ${player.deaths} / ${player.assists}</strong>
-            <span>${kda} KDA</span>
+            <span>${escapeHtml(championDisplayName(data, player.championName))} · ${kda} KDA</span>
           </div>
           <div class="build-row">
-            <div class="rune-row">${renderRunes(player, data)}</div>
+            <div class="rune-row">${renderRunes(player, data)}${renderSpells(player, data)}</div>
             <div class="item-row">${renderItems(player, data.ddragonVersion)}</div>
           </div>
         </div>
@@ -1688,7 +1858,7 @@ function matchCard(match, data) {
             killParticipation,
             csPerMinute: Number(csPerMinute),
             visionScore: player.visionScore || 0
-          })}</p>
+           }, match, player)}</p>
         </div>
         ${renderTeams(match, data)}
       </div>
@@ -1696,7 +1866,8 @@ function matchCard(match, data) {
   `;
 }
 
-function matchAnalysisComment(metrics) {
+function matchAnalysisComment(metrics, match, player) {
+  if (isEarlyEnd(match)) return "조기 종료된 경기로 개인 요약과 플레이 경향 분석에서 제외합니다.";
   if (metrics.killParticipation >= 70) {
     return "높은 킬 관여율을 기록하며 팀 교전에 적극적으로 기여한 경기입니다.";
   }
@@ -1706,7 +1877,7 @@ function matchAnalysisComment(metrics) {
   if (metrics.csPerMinute >= 7.5) {
     return "CS 수급이 좋아 안정적으로 성장한 경기입니다.";
   }
-  if (metrics.visionScore < 15) {
+  if ([400, 420, 430, 440, 490].includes(match.info.queueId) && metrics.visionScore / Math.max(match.info.gameDuration / 60, 1) < .5) {
     return "시야 점수를 조금 더 높이면 오브젝트 교전 준비에 도움이 될 수 있습니다.";
   }
   if (metrics.deaths >= 7) {
@@ -1743,8 +1914,15 @@ function renderItems(player, version) {
   return [0, 1, 2, 3, 4, 5, 6].map((index) => {
     const itemId = player[`item${index}`];
     return itemId
-      ? `<img src="${ddragonUrl(version, `img/item/${itemId}.png`)}" alt="아이템">`
+      ? `<img src="${ddragonUrl(version, `img/item/${itemId}.png`)}" alt="${escapeHtml(currentData?.staticData?.items?.[itemId]?.name || `아이템 ${itemId}`)}" title="${escapeHtml(currentData?.staticData?.items?.[itemId]?.name || `아이템 ${itemId}`)}" loading="lazy">`
       : '<span class="item-empty"></span>';
+  }).join("");
+}
+
+function renderSpells(player, data) {
+  return [player.summoner1Id, player.summoner2Id].map((id) => {
+    const spell = data.staticData?.spells?.[id];
+    return spell ? `<img class="spell-icon" src="${ddragonUrl(data.ddragonVersion, `img/spell/${spell.image}`)}" alt="${escapeHtml(spell.name)}" title="${escapeHtml(spell.name)}" loading="lazy">` : "";
   }).join("");
 }
 
@@ -1774,6 +1952,12 @@ function teamColumn(label, participants, data) {
             ? `<button class="participant-name participant-search" type="button" data-riot-id="${escapeHtml(riotId)}" title="${escapeHtml(`${riotId} 전적 검색`)}">${escapeHtml(displayName)}</button>`
             : `<span class="participant-name">${escapeHtml(displayName)}</span>`}
           <span class="participant-kda">${participant.kills}/${participant.deaths}/${participant.assists}</span>
+          <div class="participant-metrics">
+            <span>CS <b>${number((participant.totalMinionsKilled || 0) + (participant.neutralMinionsKilled || 0))}</b></span>
+            <span>피해량 <b>${number(participant.totalDamageDealtToChampions)}</b></span>
+            <span>시야 <b>${number(participant.visionScore)}</b></span>
+          </div>
+          <div class="participant-build item-row">${renderItems(participant, data.ddragonVersion)}</div>
         </div>
       `;
       }).join("")}
@@ -1854,28 +2038,15 @@ function normalizeName(value) {
     .replace(/\s+/g, " ");
 }
 
-function getQueueType(queueId) {
-  const queues = {
-    420: { label: "솔로 랭크", category: "solo", queueType: "RANKED_SOLO_5x5" },
-    430: { label: "일반 교차", category: "normal" },
-    440: { label: "자유 랭크 5대5", category: "flex", queueType: "RANKED_FLEX_SR" },
-    450: { label: "무작위 총력전", category: "aram" },
-    490: { label: "빠른 대전", category: "normal" },
-    400: { label: "일반 선택", category: "other" },
-    900: { label: "URF", category: "other" },
-    1700: { label: "아레나", category: "other" }
-  };
-  return queues[queueId] || { label: "기타 모드", category: "other" };
-}
-
 function updateRankSnapshots(data) {
-  if (!data?.account?.puuid || data.isDemo) return {};
+  if (!data?.account?.puuid || data.isDemo || data.rankWarning) return {};
 
   const key = `rift-record-rank-snapshots:${data.account.puuid}`;
   let previous = {};
 
   try {
-    previous = JSON.parse(localStorage.getItem(key) || "{}");
+    previous = JSON.parse(storage.getItem(key) || "{}");
+    if (!previous || typeof previous !== "object" || Array.isArray(previous)) previous = {};
   } catch {
     previous = {};
   }
@@ -1894,26 +2065,33 @@ function updateRankSnapshots(data) {
       leaguePoints: Number(entry.leaguePoints || 0),
       wins: Number(entry.wins || 0),
       losses: Number(entry.losses || 0),
-      updatedAt: new Date().toISOString()
+      updatedAt: data.updatedAt
     };
     const oldSnapshot = previous[entry.queueType];
-    const delta = oldSnapshot
+    const comparable = oldSnapshot && snapshot.wins + snapshot.losses >= Number(oldSnapshot.wins || 0) + Number(oldSnapshot.losses || 0);
+    if (comparable && oldSnapshot.updatedAt === data.updatedAt) {
+      current[entry.queueType] = oldSnapshot;
+      tracking[entry.queueType] = oldSnapshot.tracking || { status: "pending" };
+      continue;
+    }
+    const delta = comparable
       ? rankSnapshotScore(snapshot) - rankSnapshotScore(oldSnapshot)
       : null;
 
     current[entry.queueType] = snapshot;
     tracking[entry.queueType] = {
       delta,
-      status: oldSnapshot ? "tracked" : "pending",
+      status: comparable ? "tracked" : "pending",
       previousUpdatedAt: oldSnapshot?.updatedAt || null,
       latestMatchId: data.matches.find(
         (match) => getQueueType(match.info.queueId).queueType === entry.queueType
       )?.metadata?.matchId || null
     };
+    current[entry.queueType].tracking = tracking[entry.queueType];
   }
 
   try {
-    localStorage.setItem(key, JSON.stringify(current));
+    storage.setItem(key, JSON.stringify(current));
   } catch {
     // Rank tracking remains unavailable when storage is blocked.
   }
@@ -1921,55 +2099,21 @@ function updateRankSnapshots(data) {
   return tracking;
 }
 
-function rankSnapshotScore(snapshot) {
-  const tiers = {
-    IRON: 0,
-    BRONZE: 1,
-    SILVER: 2,
-    GOLD: 3,
-    PLATINUM: 4,
-    EMERALD: 5,
-    DIAMOND: 6,
-    MASTER: 7,
-    GRANDMASTER: 8,
-    CHALLENGER: 9
-  };
-  const divisions = { IV: 0, III: 1, II: 2, I: 3 };
-  const tier = tiers[String(snapshot?.tier || "").toUpperCase()];
-  const division = divisions[String(snapshot?.rank || "").toUpperCase()] ?? 0;
-  if (tier === undefined) return Number(snapshot?.leaguePoints || 0);
-  return tier * 400 + division * 100 + Number(snapshot?.leaguePoints || 0);
-}
-
 function renderLpTrackingBadge(match, data, queue) {
-  if (!queue.queueType) return "";
-
-  const tracking = data.rankTracking?.[queue.queueType];
-  if (!tracking || tracking.status === "pending") {
-    return '<span class="lp-change-badge neutral">LP 추적 전</span>';
-  }
-
-  const matchId = match.metadata?.matchId;
-  if (!tracking.latestMatchId || tracking.latestMatchId !== matchId) {
-    return '<span class="lp-change-badge neutral">LP 기록 없음</span>';
-  }
-
-  const delta = Number(tracking.delta || 0);
-  const sign = delta > 0 ? "+" : "";
-  const tone = delta > 0 ? "positive" : delta < 0 ? "negative" : "neutral";
-  return `<span class="lp-change-badge ${tone}" title="이전 검색 시점 대비 변화입니다.">최근 LP ${sign}${delta}</span>`;
+  return "";
 }
 
 function saveRecentSearch(riotId) {
   const normalized = riotId.toLowerCase();
   const existing = getRecentSearches().filter((item) => item.toLowerCase() !== normalized);
-  localStorage.setItem("rift-record-recent", JSON.stringify([riotId, ...existing].slice(0, 5)));
+  storage.setItem("rift-record-recent", JSON.stringify([riotId, ...existing].slice(0, 5)));
   renderRecentSearches();
 }
 
 function getRecentSearches() {
   try {
-    return JSON.parse(localStorage.getItem("rift-record-recent") || "[]");
+    const values = JSON.parse(storage.getItem("rift-record-recent") || "[]");
+    return Array.isArray(values) ? values.filter((value) => typeof value === "string" && parseRiotId(value)).slice(0, 5) : [];
   } catch {
     return [];
   }
@@ -1991,7 +2135,8 @@ function renderRecentSearches() {
 
 function getFavoriteSearches() {
   try {
-    return JSON.parse(localStorage.getItem("rift-record-favorites") || "[]");
+    const values = JSON.parse(storage.getItem("rift-record-favorites") || "[]");
+    return Array.isArray(values) ? values.filter((value) => typeof value === "string" && parseRiotId(value)).slice(0, 5) : [];
   } catch {
     return [];
   }
@@ -2008,7 +2153,7 @@ function toggleCurrentFavorite() {
     ? favorites.filter((item) => item.toLowerCase() !== normalized)
     : [currentRiotId, ...favorites.filter((item) => item.toLowerCase() !== normalized)].slice(0, 5);
 
-  localStorage.setItem("rift-record-favorites", JSON.stringify(next));
+  storage.setItem("rift-record-favorites", JSON.stringify(next));
   renderFavoriteSearches();
   updateFavoriteButton();
 }
@@ -2044,6 +2189,7 @@ function handleInitialQuery() {
   if (location.pathname === "/champions") return;
 
   const params = new URLSearchParams(location.search);
+  setSearchGame(params.get("game"));
 
   if (params.get("demo") === "true") {
     showDemoData();
@@ -2109,7 +2255,7 @@ function createDemoTftData(lolData) {
   const traits = ["별 수호자", "전략가", "기원자", "난동꾼", "결투가", "요새"];
   const units = ["아리", "럭스", "세라핀", "가렌", "이즈리얼", "리 신", "소나", "징크스"];
   const augments = ["판도라의 아이템", "보석 연꽃", "전투 마법사", "회복의 구", "단결된 의지"];
-  const companion = { id: "demo-chibi-seraphine", name: "미니 수정장미 세라핀", imageUrl: null };
+  const companion = { id: "demo-profile", name: "데모 전략가", imageUrl: null };
   const tftMatches = Array.from({ length: 10 }, (_, index) => ({
     matchId: `TFT_DEMO_${index + 1}`,
     gameDatetime: Date.now() - (index + 1) * 4 * 60 * 60 * 1000,
@@ -2141,7 +2287,7 @@ function createDemoTftData(lolData) {
     match.participants = Array.from({ length: 8 }, (_, playerIndex) => {
       const placement = playerIndex + 1;
       return {
-        name: playerIndex === match.placement - 1 ? "Hide on bush#KR1" : `TFT Player ${placement}#KR1`,
+        name: playerIndex === match.placement - 1 ? `${lolData.account.gameName}#${lolData.account.tagLine}` : `TFT Player ${placement}#DEMO`,
         placement,
         level: Math.max(6, 9 - Math.floor(playerIndex / 2)),
         lastRound: Math.max(21, match.lastRound - Math.floor(playerIndex / 2)),
@@ -2157,6 +2303,12 @@ function createDemoTftData(lolData) {
     });
   });
   const placements = tftMatches.map((match) => match.placement);
+  const portraitIds = ["Ahri", "Lux", "Seraphine", "Garen", "Ezreal", "LeeSin", "Sona", "Jinx"];
+  const unitAssets = {};
+  for (const match of tftMatches) for (const unit of match.units) {
+    unitAssets[unit.id.toLowerCase()] = { name: unit.name, imageUrl: championImage(lolData.ddragonVersion, portraitIds[units.indexOf(unit.name)]) };
+  }
+  companion.imageUrl = ddragonUrl(lolData.ddragonVersion, "img/profileicon/29.png");
 
   return {
     account: lolData.account,
@@ -2174,6 +2326,7 @@ function createDemoTftData(lolData) {
       winRate: 60
     },
     tftMatches,
+    tftStaticData: { units: unitAssets },
     tftSummary: {
       games: tftMatches.length,
       averagePlacement: placements.reduce((total, placement) => total + placement, 0) / placements.length,
@@ -2196,7 +2349,10 @@ function createDemoData() {
     { id: "LeeSin", name: "리 신", key: 64 },
     { id: "Ezreal", name: "이즈리얼", key: 81 },
     { id: "Ashe", name: "애쉬", key: 22 },
-    { id: "Thresh", name: "쓰레쉬", key: 412 }
+    { id: "Thresh", name: "쓰레쉬", key: 412 },
+    { id: "Jinx", name: "징크스", key: 222 },
+    { id: "Orianna", name: "오리아나", key: 61 },
+    { id: "Caitlyn", name: "케이틀린", key: 51 }
   ];
 
   const matchChampions = ["Ahri", "LeeSin", "Ezreal", "Ashe", "Thresh", "Jinx", "Orianna", "Caitlyn"];
@@ -2216,12 +2372,12 @@ function createDemoData() {
       puuid,
       teamId: 100,
       win,
-      championId: 103,
+      championId: champions.find((champion) => champion.id === championName).key,
       championName,
       champLevel: 14 + (index % 4),
       riotIdGameName: "Rift Record Demo",
       summonerName: "Rift Record Demo",
-      teamPosition: index % 4 === 1 ? "JUNGLE" : index % 4 === 2 ? "BOTTOM" : "MIDDLE",
+      teamPosition: ({ LeeSin: "JUNGLE", Ezreal: "BOTTOM", Ashe: "BOTTOM", Thresh: "UTILITY", Jinx: "BOTTOM", Caitlyn: "BOTTOM" })[championName] || "MIDDLE",
       individualPosition: "MIDDLE",
       kills: 4 + (index % 8),
       deaths: win ? 2 + (index % 3) : 5 + (index % 4),
@@ -2238,6 +2394,8 @@ function createDemoData() {
       item4: index > 7 ? 3135 : 0,
       item5: index > 11 ? 3157 : 0,
       item6: 3340,
+      summoner1Id: 4,
+      summoner2Id: 14,
       perks: {
         styles: [
           { style: 8100, selections: [{ perk: 8112 }] },
@@ -2307,6 +2465,8 @@ function createDemoData() {
     matches,
     staticData: {
       champions: staticChampions,
+      items: { 6655: { name: "루덴의 동반자" }, 3020: { name: "마법사의 신발" }, 3089: { name: "라바돈의 죽음모자" }, 4645: { name: "그림자불꽃" }, 3340: { name: "투명 와드" }, 3135: { name: "공허의 지팡이" }, 3157: { name: "존야의 모래시계" }, 1055: { name: "도란의 검" }, 3006: { name: "광전사의 군화" } },
+      spells: { 4: { name: "점멸", image: "SummonerFlash.png" }, 14: { name: "점화", image: "SummonerDot.png" } },
       runes: {
         8112: {
           name: "감전",

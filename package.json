@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
-    "check": "node --check public/app.js && node --check server.mjs && node --check src/api-core.mjs && node --check src/match-store.mjs && node --check src/supabase-server.mjs"
+    "check": "node --check public/app.js && node --check public/data-utils.js && node --check public/theme-init.js && node --check server.mjs && node --check src/api-core.mjs && node --check src/match-store.mjs && node --check src/supabase-server.mjs && node --check src/security.mjs && node --check src/vercel-handler.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0"

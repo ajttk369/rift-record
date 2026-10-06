@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { securityHeaders } from "./src/security.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(root, "public");
@@ -25,16 +26,18 @@ const mimeTypes = {
 
 const server = createServer(async (request, response) => {
   try {
-    const host = request.headers.host || `127.0.0.1:${PORT}`;
-    const url = new URL(request.url || "/", `http://${host}`);
+    for (const [key, value] of Object.entries(securityHeaders)) response.setHeader(key, value);
+    const url = new URL(request.url || "/", `http://127.0.0.1:${PORT}`);
 
     if (url.pathname.startsWith("/api/")) {
       const result = await handleApiRequest({
         method: request.method || "GET",
         pathname: url.pathname,
-        searchParams: url.searchParams
+        searchParams: url.searchParams,
+        headers: request.headers,
+        clientId: request.socket.remoteAddress
       });
-      return sendJson(response, result.status, result.body);
+      return sendJson(response, result.status, result.body, result.headers);
     }
 
     return serveStatic(url.pathname, response);
@@ -60,7 +63,7 @@ async function serveStatic(pathname, response) {
   const filePath = join(publicRoot, requestedPath);
   const relativePath = relative(publicRoot, filePath);
 
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+  if (relativePath.startsWith("..") || isAbsolute(relativePath) || requestedPath.split(/[\\/]/).some((part) => part.startsWith("."))) {
     return sendJson(response, 403, { error: "Forbidden" });
   }
 
@@ -85,10 +88,11 @@ async function serveStatic(pathname, response) {
   }
 }
 
-function sendJson(response, status, body) {
+function sendJson(response, status, body, headers = {}) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   response.end(JSON.stringify(body));
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupabaseClient, hasSupabaseConfig } from "./supabase-server.mjs";
@@ -6,7 +6,7 @@ import { getSupabaseClient, hasSupabaseConfig } from "./supabase-server.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const localStorePath = join(root, "data", "matches.json");
 const persistenceWarning =
-  "Supabase 환경변수가 설정되지 않아 배포 환경에서 데이터를 수집해 저장할 수 없습니다. Vercel Environment Variables에 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY를 추가해 주세요.";
+  "전적 조회는 가능하지만 통계 저장 기능이 설정되지 않은 환경입니다.";
 
 let localStoreCache;
 let localWriteQueue = Promise.resolve();
@@ -47,9 +47,7 @@ export async function saveMatches(matches) {
   const matchIds = matches.map((match) => match.metadata.matchId);
   const existing = await getMatchesByIds(matchIds);
   const additions = matches.filter((match) => !existing.has(match.metadata.matchId));
-  if (!additions.length) return { persisted: true, inserted: 0 };
-
-  const matchRows = additions.map((match) => ({
+  const matchRows = matches.map((match) => ({
     match_id: match.metadata.matchId,
     game_creation: match.info.gameCreation || match.info.gameStartTimestamp || null,
     game_duration: match.info.gameDuration || null,
@@ -63,7 +61,8 @@ export async function saveMatches(matches) {
     .upsert(matchRows, { onConflict: "match_id", ignoreDuplicates: true });
   if (matchError) throw databaseError(matchError);
 
-  const participantRows = additions.flatMap((match) =>
+  // Retry participant writes for existing matches as well, repairing partial saves.
+  const participantRows = matches.flatMap((match) =>
     (match.info.participants || []).map((participant) => ({
       match_id: match.metadata.matchId,
       puuid: participant.puuid || null,
@@ -103,15 +102,25 @@ export async function saveMatches(matches) {
   return { persisted: true, inserted: additions.length };
 }
 
-export async function getParticipantsForStats() {
+export function isStatsMatch(match, { patchVersion, since }) {
+  const patch = String(patchVersion || "").split(".").slice(0, 2).join(".");
+  return match.info?.queueId === 420 &&
+    String(match.info.gameVersion || "").startsWith(`${patch}.`) &&
+    Number(match.info.gameCreation || match.info.gameStartTimestamp || 0) >= since &&
+    Number(match.info.gameDuration || 0) >= 300;
+}
+
+export async function getParticipantsForStats({ patchVersion, since = Date.now() - 28 * 86400_000 } = {}) {
+  if (!patchVersion) return [];
   if (!hasSupabaseConfig()) {
     const store = await readLocalStore();
     return store.matches.flatMap((match) =>
-      match.info.queueId === 420
+      isStatsMatch(match, { patchVersion, since })
         ? (match.info.participants || []).map((participant) => ({
             ...participant,
             match_id: match.metadata.matchId,
-            game_duration: match.info.gameDuration
+            game_duration: match.info.gameDuration,
+            game_creation: match.info.gameCreation || match.info.gameStartTimestamp
           }))
         : []
     );
@@ -123,10 +132,16 @@ export async function getParticipantsForStats() {
   for (let start = 0; ; start += pageSize) {
     const { data, error } = await supabase
       .from("participants")
-      .select("*")
+      .select("*, matches!inner(queue_id, game_version, game_creation, game_duration)")
+      .eq("matches.queue_id", 420)
+      .like("matches.game_version", `${patchVersion.split(".").slice(0, 2).join(".")}.%`)
+      .gte("matches.game_creation", since)
+      .gte("matches.game_duration", 300)
+      .order("match_id")
+      .order("puuid")
       .range(start, start + pageSize - 1);
     if (error) throw databaseError(error);
-    rows.push(...(data || []));
+    rows.push(...(data || []).map(({ matches, ...row }) => ({ ...row, game_creation: matches?.game_creation })));
     if (!data || data.length < pageSize) break;
   }
   return rows;
@@ -178,8 +193,11 @@ export async function getLastUpdatedAt() {
 async function readLocalStore() {
   if (localStoreCache) return localStoreCache;
   try {
-    localStoreCache = JSON.parse(await readFile(localStorePath, "utf8"));
-  } catch {
+    const stored = JSON.parse(await readFile(localStorePath, "utf8"));
+    if (!Array.isArray(stored.matches)) throw new Error("Invalid local match store");
+    localStoreCache = stored;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw databaseError(error);
     localStoreCache = { matches: [], updatedAt: null };
   }
   return localStoreCache;
@@ -187,15 +205,17 @@ async function readLocalStore() {
 
 async function saveLocalMatches(matches) {
   let result = { persisted: true, inserted: 0 };
-  localWriteQueue = localWriteQueue.then(async () => {
+  localWriteQueue = localWriteQueue.catch(() => {}).then(async () => {
     const store = await readLocalStore();
     const existing = new Set(store.matches.map((match) => match.metadata.matchId));
     const additions = matches.filter((match) => !existing.has(match.metadata.matchId));
     if (!additions.length) return;
-    store.matches.push(...additions);
-    store.updatedAt = new Date().toISOString();
+    const updated = { matches: [...store.matches, ...additions], updatedAt: new Date().toISOString() };
     await mkdir(join(root, "data"), { recursive: true });
-    await writeFile(localStorePath, JSON.stringify(store), "utf8");
+    const temporaryPath = `${localStorePath}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(updated), "utf8");
+    await rename(temporaryPath, localStorePath);
+    localStoreCache = updated;
     result = { persisted: true, inserted: additions.length };
   });
   await localWriteQueue;

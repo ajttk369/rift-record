@@ -8115,3 +8115,159 @@ html[data-theme="dark"] .tft-participant-row.is-current .tft-participant-placeme
 .welcome-copy p {
   max-width: 620px;
 }
+
+/* Search and result surfaces share the same compact, readable spacing. */
+body { letter-spacing: 0; }
+.search-band { min-height: 0; padding: 48px 0 40px; background: var(--theme-bg-elevated); }
+.search-band::before, .search-band::after { display: none; }
+.search-inner h1 { font-size: 48px; line-height: 1.2; letter-spacing: 0; margin-bottom: 22px; }
+.search-inner .eyebrow { font-size: 11px; letter-spacing: 0; line-height: 1.6; }
+.search-game-selector { display: inline-flex; gap: 4px; margin-bottom: 14px; padding: 3px; border: 1px solid var(--theme-line); border-radius: 6px; background: var(--theme-surface); }
+.search-game-selector button { min-width: 68px; min-height: 36px; padding: 6px 14px; color: var(--theme-text-soft); background: transparent; border: 0; border-radius: 4px; font-size: 13px; font-weight: 700; }
+.search-game-selector button.active { background: var(--theme-lime); color: #161a10; }
+.search-box { border-radius: 8px; box-shadow: none; }
+.search-box input { min-width: 0; font-size: 16px; }
+.search-box button { border-radius: 5px; }
+.search-support p, .demo-button { font-size: 12px; }
+.request-status { margin: 10px 0 0; color: var(--theme-text-soft); font-size: 13px; line-height: 1.5; }
+.request-status:empty { display: none; }
+.search-band.has-results { min-height: 0; padding: 16px 0; }
+.search-band.has-results .search-inner { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; align-items: center; }
+.search-band.has-results .search-game-selector { margin: 0; }
+.search-band.has-results .eyebrow, .search-band.has-results h1,
+.search-band.has-results .recent-searches, .search-band.has-results .search-support { display: none; }
+.search-band.has-results .search-form { width: 100%; margin: 0; }
+.search-band.has-results .search-box { min-height: 52px; padding: 5px 6px 5px 14px; }
+.search-band.has-results .search-box button { min-height: 40px; }
+.search-band.has-results .request-status { grid-column: 1 / -1; margin: 0; }
+.welcome { padding-top: 30px; padding-bottom: 30px; }
+.welcome h2 { font-size: 24px; line-height: 1.4; letter-spacing: 0; }
+.welcome p { font-size: 13px; }
+.result-toolbar { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 16px 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#result-caption { font-size: 13px; color: var(--theme-muted); overflow-wrap: anywhere; }
+.result-toolbar .profile-actions { display: flex; flex-direction: row; gap: 6px; margin: 0; }
+.result-toolbar button { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border: 1px solid var(--theme-line); border-radius: 6px; background: var(--theme-surface); color: var(--theme-text); font-size: 24px; cursor: pointer; }
+.result-toolbar button:disabled { opacity: .45; cursor: default; }
+.share-link { display: block; width: min(1180px, calc(100% - 48px)); margin: 0 auto 12px; padding: 12px; color: var(--theme-text); background: var(--theme-surface); border: 1px solid var(--theme-line); }
+.share-link[hidden] { display: none; }
+.game-tabs { border-radius: 0; box-shadow: none; }
+.game-tabs button { font-size: 14px; }
+.profile-band { margin: 0; border-radius: 0; background: transparent; box-shadow: none; border-bottom: 1px solid var(--theme-line); }
+.profile-inner { display: grid; grid-template-columns: minmax(270px, .8fr) minmax(0, 1.2fr); gap: 24px; padding: 24px 0; }
+.profile-primary { display: grid; grid-template-columns: 72px minmax(0, 1fr); min-height: 0; padding: 14px 0; background: transparent; border: 0; box-shadow: none; border-radius: 0; }
+.profile-icon-wrap { width: 72px; height: 72px; }
+.profile-icon-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.profile-primary .identity h2 { font-size: 25px; line-height: 1.3; letter-spacing: 0; }
+.identity h2 small { display: inline; margin-left: 5px; }
+.profile-overview { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.profile-ranks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.profile-rank-card { min-height: 112px; padding: 14px; border-radius: 8px; box-shadow: none; }
+.profile-rank-card strong { font-size: 16px; }
+.profile-rank-card p, .profile-rank-card small, .profile-rank-label { font-size: 12px; line-height: 1.5; }
+.profile-tier-emblem { width: 48px; height: 48px; flex-basis: 48px; }
+.profile-rank-main { gap: 10px; }
+.unranked-card { background: var(--theme-surface-soft); }
+.rank-change-note { color: var(--theme-text-soft); }
+.rank-change-note small { display: block; font-size: 11px; color: var(--theme-muted); }
+.profile-mastery { padding: 0; min-height: 0; border: 0; background: transparent; box-shadow: none; border-radius: 0; }
+#profile-mastery-list { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.profile-mastery-item { gap: 8px; }
+.profile-mastery-item strong, .profile-mastery-item span { font-size: 12px; line-height: 1.4; }
+.profile-mastery > span { display: block; margin-bottom: 8px; font-size: 12px; }
+.summary-dashboard-section, .match-section, .detailed-analysis, .analysis-dashboard, .tft-summary-section, .tft-match-section { padding: 20px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.analysis-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--theme-line); }
+.analysis-stat-card { min-height: 100px; padding: 18px; background: transparent; border: 0; border-right: 1px solid var(--theme-line); border-radius: 0; box-shadow: none; }
+.analysis-stat-card:last-child { border-right: 0; }
+.analysis-stat-card span { font-size: 12px; }
+.analysis-stat-card strong { font-size: 25px; margin-top: 12px; line-height: 1.3; }
+.analysis-heading { gap: 12px; flex-wrap: wrap; }
+.analysis-heading h2, .match-toolbar h2 { font-size: 22px; letter-spacing: 0; }
+.analysis-heading small { font-size: 12px; line-height: 1.6; }
+.analysis-heading .section-number, .match-toolbar .section-number { display: none; }
+.detailed-analysis-toggle { border-radius: 6px; box-shadow: none; }
+.detailed-analysis-toggle small { font-size: 12px; }
+.match-card, .tft-match-card, .personal-performance-card, .recommended-card, .highlight-card { border-radius: 8px; box-shadow: none; }
+.match-card:hover { box-shadow: none; }
+.match-meta span, .kda > span, .performance span, .detail-metric-grid span { font-size: 12px; line-height: 1.5; }
+.performance strong { font-size: 14px; }
+.filter-tabs { border-radius: 6px; flex-wrap: wrap; overflow: visible; }
+.filter-tabs button { border-radius: 4px; min-height: 40px; font-size: 12px; }
+.filter-tabs button span, .filter-tabs button b { font-size: 12px; }
+.scope-note { font-size: 12px; color: var(--theme-muted); line-height: 1.7; }
+.spell-icon { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; }
+.participant-metrics { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--theme-muted); }
+.participant-metrics b { color: var(--theme-text-soft); }
+.participant-build { grid-column: 2 / -1; margin-top: 4px; }
+.participant-build img, .participant-build .item-empty { width: 22px; height: 22px; border-radius: 3px; }
+.participant { padding-block: 10px; }
+.tft-filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.tft-filters label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tft-filters select { min-height: 40px; padding: 8px 30px 8px 12px; border: 1px solid var(--theme-line); border-radius: 4px; background: var(--theme-surface); color: var(--theme-text); font: inherit; }
+.tft-match-meta span, .tft-match-meta b, .tft-card-actions span, .tft-trait span, .tft-trait b { font-size: 12px; line-height: 1.5; }
+.tft-placement span, .tft-placement b, .tft-participant-stats span, .tft-participant-round span { font-size: 11px; }
+.tft-details-button { min-height: 42px; font-size: 12px; border-radius: 5px; }
+.tft-profile, .tft-rank, .tft-summary article { border-radius: 8px; box-shadow: none; }
+.tft-summary-overview { grid-template-columns: 1fr; }
+.tft-profile { border-radius: 0; background: transparent; border-bottom: 1px solid var(--theme-line); }
+.tier-sample-summary { flex-wrap: wrap; gap: 8px 16px; }
+.tier-sample-summary small { width: 100%; font-size: 12px; color: var(--theme-muted); }
+.tier-table th, .tier-table td { font-size: 13px; }
+.tier-table small, .table-champion span { font-size: 11px; }
+[role="tablist"] button:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--theme-blue); outline-offset: 3px; }
+
+@media (max-width: 768px) {
+  .search-band { padding: 28px 0; }
+  .search-inner h1 { font-size: 32px; }
+  .search-inner, .profile-inner, .results-content, .tft-content-inner, .result-toolbar, .share-link { width: calc(100% - 28px); }
+  .search-box { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; padding: 8px; }
+  .search-box button { grid-column: auto; width: auto; min-width: 66px; min-height: 44px; font-size: 14px; }
+  .search-band.has-results .search-inner { grid-template-columns: 1fr; gap: 8px; }
+  .search-band.has-results .search-game-selector { justify-self: start; }
+  .search-band.has-results { padding: 12px 0; }
+  .profile-inner { grid-template-columns: 1fr; padding: 16px 0; gap: 14px; }
+  .profile-primary { padding: 0; grid-template-columns: 60px minmax(0, 1fr); }
+  .profile-primary .identity h2 { font-size: 21px; }
+  .profile-icon-wrap { width: 56px; height: 56px; }
+  .profile-rank-card { padding: 12px; min-height: 96px; }
+  .profile-rank-card strong { font-size: 14px; }
+  .profile-rank-main { gap: 7px; align-items: center; }
+  .profile-tier-emblem { width: 36px; height: 36px; flex-basis: 36px; }
+  .profile-rank-card p, .profile-rank-card small { font-size: 11px; }
+  .analysis-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analysis-stat-card { min-height: 82px; padding: 12px; border-bottom: 1px solid var(--theme-line); }
+  .analysis-stat-card:nth-child(even) { border-right: 0; }
+  .analysis-stat-card:last-child { grid-column: 1 / -1; border-bottom: 0; }
+  .analysis-stat-card strong { font-size: 23px; margin-top: 8px; }
+  .analysis-heading h2, .match-toolbar h2 { font-size: 20px; }
+  .filter-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .filter-tabs button { min-width: 0; justify-content: space-between; padding: 8px; }
+  .filter-tabs button span { font-size: 11px; }
+  .performance { gap: 8px; }
+  .performance strong { font-size: 12px; white-space: nowrap; }
+  .performance span { font-size: 11px; }
+  .participant { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .participant-name, .participant-kda { font-size: 12px; }
+  .detail-metric-grid span { font-size: 11px; }
+  .tft-profile { padding: 16px 14px; }
+  .tft-rank { padding: 16px; min-height: 0; }
+  .tft-match-meta span, .tft-match-meta b { font-size: 11px; }
+  .tft-filters label { flex: 1; }
+  .tft-filters select { min-width: 0; width: 100%; }
+  .tier-table { min-width: 0; width: 100%; }
+  .tier-table th:nth-child(n+6), .tier-table td:nth-child(n+6) { display: none; }
+  .tier-table th, .tier-table td { padding: 10px 6px; font-size: 12px; }
+  .table-champion { gap: 6px; flex-wrap: wrap; }
+  .table-champion img { width: 28px; height: 28px; }
+  .table-champion small { flex-basis: 100%; font-size: 10px; }
+}
+
+@media (max-width: 360px) {
+  .search-inner h1 { font-size: 28px; }
+  .profile-rank-main { flex-direction: column; align-items: flex-start; }
+  .profile-rank-card { min-height: 140px; }
+  .tier-table th:first-child, .tier-table td:first-child { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

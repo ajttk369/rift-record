@@ -3,22 +3,13 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="리그 오브 레전드 한국 서버 전적 검색">
+    <meta name="description" content="Riot ID로 LoL과 TFT 전적, 최근 경기 흐름과 챔피언 성과를 확인하는 한국 서버 분석 서비스">
     <meta name="theme-color" content="#15181d">
-    <title>Rift Record - 롤 전적검색</title>
-    <script>
-      (() => {
-        try {
-          const theme = localStorage.getItem("rift-record-theme") || "light";
-          document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
-        } catch {
-          document.documentElement.dataset.theme = "light";
-        }
-      })();
-    </script>
+    <title>Rift Record - LoL · TFT 전적 분석</title>
+    <script src="/theme-init.js?v=25"></script>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://ddragon.leagueoflegends.com">
-    <link rel="stylesheet" href="/styles.css?v=24">
+    <link rel="stylesheet" href="/styles.css?v=25">
   </head>
   <body>
     <header class="topbar">
@@ -42,8 +33,12 @@
     <main>
       <section id="search" class="search-band">
         <div class="search-inner">
-          <p class="eyebrow">LEAGUE OF LEGENDS · KR</p>
+          <p class="eyebrow">LEAGUE OF LEGENDS · TEAMFIGHT TACTICS · KR</p>
           <h1>플레이 기록을 한눈에.</h1>
+          <div class="search-game-selector" role="group" aria-label="검색할 게임">
+            <button type="button" data-search-game="lol" aria-pressed="true" class="active">LoL</button>
+            <button type="button" data-search-game="tft" aria-pressed="false">TFT</button>
+          </div>
           <form id="search-form" class="search-form" autocomplete="off">
             <label class="sr-only" for="riot-id">Riot ID</label>
             <div class="search-box">
@@ -54,6 +49,7 @@
                 type="text"
                 placeholder="게임이름 #태그"
                 aria-describedby="search-hint"
+                maxlength="82"
                 required
               >
               <button type="submit" aria-label="전적 검색">
@@ -66,7 +62,7 @@
               <button id="demo-button" class="demo-button" type="button">데모 데이터 보기</button>
             </div>
           </form>
-          <p class="portfolio-notice">포트폴리오 검토용 데모입니다. Riot ID를 입력하거나 Demo Mode로 전체 기능을 확인할 수 있습니다.</p>
+          <p id="request-status" class="request-status" role="status" aria-live="polite"></p>
           <div id="recent-searches" class="recent-searches" hidden>
             <span>최근 검색</span>
             <div id="recent-list"></div>
@@ -94,7 +90,7 @@
         </div>
         <details class="criteria-panel tier-criteria">
           <summary>분석 기준</summary>
-          <p>수집한 매치의 승률, 픽률, 평균 KDA와 표본 신뢰도를 조합해 티어 점수를 계산합니다.</p>
+          <p>현재 패치의 최근 28일 솔로랭크만 사용하며 5분 미만 경기는 제외합니다. 승률 55%, 픽률 25%, KDA 10%, 표본 신뢰도 10%를 반영합니다. 챔피언당 10경기 이상, 비교 가능한 챔피언 10개 이상일 때만 등급을 산정합니다.</p>
         </details>
         <div class="lane-tabs" role="tablist" aria-label="라인 선택">
           <button class="active" type="button" data-lane="TOP">TOP</button>
@@ -126,10 +122,8 @@
                 <option value="averageKDA">KDA</option>
               </select>
             </label>
-            <button id="seed-button" class="seed-button" type="button">데이터 수집</button>
           </div>
         </div>
-        <p id="seed-status" class="seed-status" hidden></p>
         <div id="tier-sample-summary" class="tier-sample-summary"></div>
         <div id="champion-tier-board" class="champion-tier-board"></div>
       </section>
@@ -159,7 +153,7 @@
         </div>
       </section>
 
-      <section id="loading" class="loading-skeleton" hidden aria-label="전적을 불러오는 중">
+      <section id="loading" class="loading-skeleton" hidden aria-label="전적을 불러오는 중" role="status">
         <div class="skeleton-profile">
           <span class="skeleton skeleton-avatar"></span>
           <div><span class="skeleton skeleton-line wide"></span><span class="skeleton skeleton-line"></span></div>
@@ -173,13 +167,22 @@
         </div>
       </section>
 
-      <section id="error-panel" class="state-panel error-panel" hidden>
+      <section id="error-panel" class="state-panel error-panel" hidden role="alert">
         <span class="error-symbol">!</span>
         <h2>검색 결과를 불러오지 못했습니다</h2>
         <p id="error-message"></p>
       </section>
 
       <section id="results" class="results" hidden>
+        <div class="result-toolbar">
+          <span id="result-caption"></span>
+          <div class="profile-actions">
+            <button id="favorite-button" class="favorite-button" type="button" title="즐겨찾기 추가" aria-label="즐겨찾기 추가">☆</button>
+            <button id="refresh-button" class="refresh-button" type="button" title="전적 새로고침" aria-label="전적 새로고침">↻</button>
+            <button id="share-button" class="share-button" type="button" title="링크 복사" aria-label="검색 결과 링크 복사">⧉</button>
+          </div>
+        </div>
+        <input id="share-link" class="share-link" aria-label="공유할 검색 결과 주소" readonly hidden>
         <div class="game-tabs" role="tablist" aria-label="게임 전적 선택">
           <button id="lol-tab" class="active" type="button" role="tab" aria-selected="true" aria-controls="lol-results" data-game-tab="lol">소환사의 협곡</button>
           <button id="tft-tab" type="button" role="tab" aria-selected="false" aria-controls="tft-results" data-game-tab="tft">롤토체스</button>
@@ -198,10 +201,6 @@
                 <h2><span id="game-name"></span><small id="tag-line"></small></h2>
                 <span id="updated-at"></span>
               </div>
-              <div class="profile-actions">
-                <button id="favorite-button" class="favorite-button" type="button" title="즐겨찾기 추가" aria-label="즐겨찾기 추가">☆</button>
-                <button id="refresh-button" class="refresh-button" type="button" title="전적 새로고침" aria-label="전적 새로고침">↻</button>
-              </div>
             </div>
             <div class="profile-overview">
               <div id="profile-ranks" class="profile-ranks"></div>
@@ -219,9 +218,9 @@
             <div class="analysis-heading">
               <div>
                 <span class="section-number">01</span>
-                <h2>최근 15경기 요약</h2>
+                <h2 id="analysis-summary-title">최근 경기 요약</h2>
               </div>
-              <small>최근 15경기 기준</small>
+              <small id="analysis-scope"></small>
             </div>
             <div id="analysis-summary" class="analysis-summary-grid"></div>
           </section>
@@ -248,12 +247,12 @@
               <details class="criteria-panel">
                 <summary>분석 기준 보기</summary>
                 <div class="criteria-grid">
-                  <p><strong>분석 범위</strong> 최근 15경기</p>
+                  <p><strong>분석 범위</strong> 최근 15경기 중 선택한 모드, 조기 종료 제외</p>
                   <p><strong>KDA</strong> (Kills + Assists) / max(Deaths, 1)</p>
                   <p><strong>킬 관여율</strong> (Kills + Assists) / Team Kills × 100</p>
                   <p><strong>CS/분</strong> (라인 CS + 정글 CS) / 게임 시간(분)</p>
-                  <p><strong>플레이스타일</strong> KDA, 킬 관여율, CS/분, 시야, 딜량 조합</p>
-                  <p><strong>챔피언 성과</strong> 최근 15경기에서 해당 챔피언을 플레이한 기록</p>
+                  <p><strong>플레이스타일</strong> 협곡에서 포지션이 확인된 5경기 이상</p>
+                  <p><strong>챔피언 성과</strong> 선택한 모드의 챔피언별 기록</p>
                 </div>
               </details>
 
@@ -263,7 +262,7 @@
                     <span class="section-number">03</span>
                     <h2>플레이 스타일 분석</h2>
                   </div>
-                  <small>최근 15경기 기준</small>
+                  <small>선택한 모드 · 협곡 비교 표본 기준</small>
                 </div>
                 <div id="playstyle-analysis"></div>
               </section>
@@ -295,7 +294,7 @@
                     <span class="section-number">06</span>
                     <h2>추천 챔피언</h2>
                   </div>
-                  <small>최근 15경기 개인 성과 기준 추천 챔피언입니다.</small>
+                  <small>주 포지션에서 3경기 이상 플레이한 챔피언 기준</small>
                 </div>
                 <div id="recommended-picks" class="recommended-grid"></div>
               </section>
@@ -346,6 +345,7 @@
               <button type="button" data-filter="flex">자유랭크 5대5</button>
               <button type="button" data-filter="normal">일반</button>
               <button type="button" data-filter="aram">칼바람</button>
+              <button type="button" data-filter="other">기타 모드</button>
             </div>
             <div id="match-list" class="match-list"></div>
             <p id="empty-matches" class="empty-matches" hidden>해당 조건의 경기가 없습니다.</p>
@@ -395,6 +395,11 @@
                 <div class="analysis-heading">
                   <div><span class="section-number">TFT 01</span><h2>최근 10경기 요약</h2></div>
                 </div>
+                <div class="tft-filters">
+                  <label>모드 <select id="tft-mode"><option value="all">전체</option><option value="ranked">랭크</option><option value="normal">일반</option><option value="double">더블업</option><option value="other">기타</option></select></label>
+                  <label>세트 <select id="tft-set"><option value="all">전체 세트</option></select></label>
+                </div>
+                <p id="tft-period" class="scope-note"></p>
                 <div id="tft-summary" class="tft-summary"></div>
               </section>
 
@@ -425,9 +430,9 @@
               <h2>주요 구현 내용</h2>
             </div>
             <div class="built-grid">
-              <article><strong>Riot API 연동</strong><p>Riot ID, 최근 솔로 랭크, 랭크 정보와 챔피언 숙련도를 서버 API로 조회합니다.</p></article>
+              <article><strong>Riot API 연동</strong><p>Riot ID로 LoL과 TFT의 프로필, 랭크, 최근 전적을 독립 조회합니다.</p></article>
               <article><strong>매치 데이터 분석</strong><p>KDA, CS/분, 킬 관여율, 피해량과 시야 점수를 최근 15경기 기준으로 분석합니다.</p></article>
-              <article><strong>자체 챔피언 티어</strong><p>수집한 참가자 데이터로 라인별 자체 티어를 계산하고 Low Sample을 표시합니다.</p></article>
+              <article><strong>자체 챔피언 티어</strong><p>현재 패치·최근 28일 솔로랭크를 집계하고 표본 부족 시 등급을 보류합니다.</p></article>
               <article><strong>API 키 보안</strong><p>Riot API 키와 Supabase Service Role 키를 서버 환경변수로만 관리합니다.</p></article>
               <article><strong>데이터 저장</strong><p>Supabase에 매치와 참가자 데이터를 저장해 Vercel에서도 수집 결과를 유지합니다.</p></article>
               <article><strong>데모 모드</strong><p>API 키나 DB 설정 없이도 주요 분석 기능을 확인할 수 있는 샘플 데이터를 제공합니다.</p></article>
@@ -466,6 +471,6 @@
       <p>Rift Record is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.</p>
     </footer>
 
-    <script type="module" src="/app.js?v=24"></script>
+    <script type="module" src="/app.js?v=25"></script>
   </body>
 </html>

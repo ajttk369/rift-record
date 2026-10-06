@@ -1,14 +1,14 @@
 import {
-  getChampionStatsFromCache,
   getLastUpdatedAt,
   getMatchesByIds,
   getParticipantsForStats,
   getPersistenceWarning,
   getStoredMatchCount,
-  saveMatches,
-  upsertChampionStatsCache
+  saveMatches
 } from "./match-store.mjs";
 import { getSupabaseStatus, hasSupabaseConfig } from "./supabase-server.mjs";
+import { authorizeAdmin, createRateLimiter, fetchWithTimeout } from "./security.mjs";
+import { assignTierGrades } from "../public/data-utils.js";
 
 const API_KEY = process.env.RIOT_API_KEY;
 const TFT_API_KEY = process.env.TFT_API_KEY;
@@ -21,9 +21,20 @@ const tftStaticDataCache = new Map();
 let riotRequestQueue = Promise.resolve();
 const responseCache = new Map();
 const tftResponseCache = new Map();
+const profileRequests = new Map();
+const championStatsCache = new Map();
+const checkRateLimit = createRateLimiter();
+const ADMIN_ROUTES = new Set(["/api/seed-champion-stats", "/api/recalculate-champion-stats", "/api/db-health"]);
 
-export async function handleApiRequest({ method, pathname, searchParams }) {
+export async function handleApiRequest({ method, pathname, searchParams, headers = {}, clientId = "local" }) {
   try {
+    const expectedMethod = pathname === "/api/seed-champion-stats" || pathname === "/api/recalculate-champion-stats" ? "POST" : "GET";
+    if (method !== expectedMethod) return { ...fail(405, "지원하지 않는 요청 방식입니다."), headers: { Allow: expectedMethod } };
+    if (ADMIN_ROUTES.has(pathname) && !authorizeAdmin(headers)) return fail(401, "관리자 인증이 필요합니다.");
+    if (pathname !== "/api/health") {
+      const retryAfter = checkRateLimit(clientId);
+      if (retryAfter) return { ...fail(429, "요청이 많습니다. 잠시 후 다시 시도해 주세요."), headers: { "Retry-After": String(retryAfter) } };
+    }
     if (pathname === "/api/health") {
       return ok({
         status: "ok",
@@ -80,6 +91,7 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
       const players = clamp(Number(searchParams.get("players") || 5), 1, 10);
       const matches = clamp(Number(searchParams.get("matches") || 10), 1, 15);
       const tier = String(searchParams.get("tier") || "challenger").toLowerCase();
+      if (!Number.isInteger(players) || !Number.isInteger(matches) || !["challenger", "grandmaster", "master"].includes(tier)) return fail(400, "수집 조건이 올바르지 않습니다.");
 
       return ok(await seedChampionStats({ players, matches, tier }));
     }
@@ -90,11 +102,11 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
       const gameName = searchParams.get("gameName")?.trim();
       const tagLine = searchParams.get("tagLine")?.trim();
 
-      if (!gameName || !tagLine) {
+      if (!validRiotId(gameName, tagLine)) {
         return fail(400, "Riot ID를 게임이름#태그 형식으로 입력해 주세요.");
       }
 
-      return ok(await getSummonerProfile(gameName, tagLine));
+      return ok(await coalesceProfile(`lol:${gameName.toLowerCase()}#${tagLine.toLowerCase()}`, () => getSummonerProfile(gameName, tagLine, searchParams.get("refresh") === "1")));
     }
 
     if (pathname === "/api/tft") {
@@ -118,17 +130,16 @@ export async function handleApiRequest({ method, pathname, searchParams }) {
             ? "API 키가 만료되었거나 유효하지 않습니다. 새 개발 키로 교체해 주세요."
             : status === 429
               ? "Riot API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
-              : error.message || "서버에서 요청을 처리하지 못했습니다.";
+              : status === 502 || status === 504
+                ? "외부 데이터 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+                : "서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
-    console.error("[handleApiRequest] failed", safeDebug);
+    console.error("[handleApiRequest] failed", { status, code: safeDebug.code });
 
     return {
       status,
       body: {
-        error: message,
-        endpoint: error.endpoint,
-        riotMessage: error.riotMessage,
-        debug: safeDebug
+        error: message
       }
     };
   }
@@ -140,6 +151,32 @@ function ok(body) {
 
 function fail(status, error) {
   return { status, body: { error } };
+}
+
+function validRiotId(gameName, tagLine) {
+  return typeof gameName === "string" && typeof tagLine === "string" && gameName.length >= 1 && gameName.length <= 64 &&
+    tagLine.length >= 1 && tagLine.length <= 16 && !/[\u0000-\u001f\u007f]/.test(`${gameName}${tagLine}`);
+}
+
+async function coalesceProfile(key, load) {
+  if (profileRequests.has(key)) return profileRequests.get(key);
+  const request = load();
+  profileRequests.set(key, request);
+  try { return await request; } finally { profileRequests.delete(key); }
+}
+
+function cacheProfile(cache, key, payload) {
+  for (const [id, row] of cache) if (row.expiresAt <= Date.now()) cache.delete(id);
+  if (cache.size >= 200) cache.delete(cache.keys().next().value);
+  cache.set(key, { value: payload, expiresAt: Date.now() + 120_000 });
+}
+
+function cachedProfile(cache, key, refresh) {
+  const row = cache.get(key);
+  if (!row || row.expiresAt <= Date.now()) return null;
+  const age = Date.now() - new Date(row.value.updatedAt).getTime();
+  if (refresh && age >= 30_000) return null;
+  return { ...row.value, cached: true, refreshAfterSeconds: Math.max(0, Math.ceil((30_000 - age) / 1000)) };
 }
 
 async function handleDbHealth() {
@@ -158,7 +195,7 @@ async function handleDbHealth() {
     }
 
     const storedMatchCount = await getStoredMatchCount();
-    const participants = await getParticipantsForStats();
+    const participants = await getParticipantsForStats({ patchVersion: await getDdragonVersion() });
 
     return ok({
       ok: true,
@@ -183,13 +220,10 @@ async function handleDbHealth() {
   }
 }
 
-async function getSummonerProfile(gameName, tagLine) {
+async function getSummonerProfile(gameName, tagLine, refresh = false) {
   const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
-  const cached = responseCache.get(cacheKey);
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
+  const cached = cachedProfile(responseCache, cacheKey, refresh);
+  if (cached) return cached;
 
   const account = await riotFetch(
     REGION,
@@ -203,13 +237,19 @@ async function getSummonerProfile(gameName, tagLine) {
   ]);
 
   const [ranked, masteries, matches, staticData] = await Promise.all([
-    riotFetch(PLATFORM, `/lol/league/v4/entries/by-puuid/${account.puuid}`),
-    riotFetch(PLATFORM, `/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}/top?count=5`),
+    riotFetchOptional(PLATFORM, `/lol/league/v4/entries/by-puuid/${account.puuid}`, [401, 403, 404, 429, 500, 502, 503, 504]),
+    riotFetchOptional(PLATFORM, `/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}/top?count=5`, [401, 403, 404, 429, 500, 502, 503, 504]),
     getStoredOrFetchMatches(matchIds),
-    getStaticData(version)
+    getStaticData(version).catch(() => ({ champions: {}, runes: {}, runeStyles: {}, items: {}, spells: {} }))
   ]);
 
-  const persistence = await saveMatches(matches);
+  let persistence;
+  try {
+    persistence = await saveMatches(matches);
+    if (persistence.persisted) championStatsCache.clear();
+  } catch {
+    persistence = { warning: "전적 조회는 완료했지만 통계 저장이 지연되고 있습니다." };
+  }
 
   const compactMatches = matches.map(compactMatch);
 
@@ -223,19 +263,18 @@ async function getSummonerProfile(gameName, tagLine) {
       level: summoner.summonerLevel,
       profileIconId: summoner.profileIconId
     },
-    ranked,
-    masteries,
+    ranked: ranked || [],
+    masteries: masteries || [],
     matches: compactMatches,
-    staticData: compactStaticData(staticData, compactMatches, masteries),
+    staticData: compactStaticData(staticData, compactMatches, masteries || []),
     ddragonVersion: version,
     updatedAt: new Date().toISOString(),
-    persistenceWarning: persistence.warning || getPersistenceWarning()
+    persistenceWarning: persistence.warning || getPersistenceWarning(),
+    rankWarning: ranked === null ? "랭크 정보가 일시적으로 조회되지 않았습니다." : null,
+    refreshAfterSeconds: 30
   };
 
-  responseCache.set(cacheKey, {
-    value: payload,
-    expiresAt: Date.now() + 2 * 60 * 1000
-  });
+  cacheProfile(responseCache, cacheKey, payload);
 
   return payload;
 }
@@ -245,38 +284,34 @@ async function handleTftRequest(searchParams) {
     return {
       status: 503,
       body: {
-        error: "TFT API Key가 설정되어 있지 않습니다.",
-        debug: {
-          hasTftApiKey: false
-        }
+        error: "롤토체스 전적 서비스를 일시적으로 이용할 수 없습니다."
       }
     };
   }
 
   const gameName = searchParams.get("gameName")?.trim();
   const tagLine = searchParams.get("tagLine")?.trim();
-  const receivedPuuid = searchParams.get("puuid")?.trim() || null;
 
-  if (!gameName || !tagLine) {
+  if (!validRiotId(gameName, tagLine)) {
     return fail(400, "계정 정보를 찾을 수 없습니다.");
   }
 
   try {
-    const account = await tftRiotFetch(
-      "tft-account",
-      "asia.api.riotgames.com",
-      `/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`
-    );
-    return ok(await getTftProfile({
-      gameName,
-      tagLine,
-      receivedPuuid,
-      resolvedAccountPuuid: account.puuid
+    const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
+    const refresh = searchParams.get("refresh") === "1";
+    return ok(await coalesceProfile(`tft:${cacheKey}`, async () => {
+      const cached = cachedProfile(tftResponseCache, cacheKey, refresh);
+      if (cached) return cached;
+      const account = await tftRiotFetch(
+        "tft-account",
+        "asia.api.riotgames.com",
+        `/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`
+      );
+      return getTftProfile({ gameName: account.gameName || gameName, tagLine: account.tagLine || tagLine, resolvedAccountPuuid: account.puuid, refresh });
     }));
   } catch (error) {
     const debug = {
       step: error.tftStep || "unknown",
-      receivedPuuid,
       resolvedAccountPuuid: error.resolvedAccountPuuid || null,
       gameName,
       tagLine,
@@ -284,7 +319,7 @@ async function handleTftRequest(searchParams) {
       url: error.tftUrl || null,
       riotMessage: error.riotMessage || error.message || "Unknown TFT API error"
     };
-    console.error("[handleTftRequest] failed", debug);
+    console.error("[handleTftRequest] failed", { status: debug.status, step: debug.step });
     const decryptFailure = error.tftStep === "tft-match-ids" &&
       error.status === 400 &&
       /decrypt/i.test(String(error.riotMessage || ""));
@@ -293,8 +328,13 @@ async function handleTftRequest(searchParams) {
       body: {
         error: decryptFailure
           ? "이 Riot ID의 TFT 전적을 조회할 수 없습니다. Riot ID 또는 태그를 다시 확인해주세요."
-          : "롤토체스 최근 전적을 불러오는 중 문제가 발생했습니다.",
-        debug
+          : error.status === 401 || error.status === 403
+            ? "TFT API 인증에 문제가 있습니다. 서버의 TFT 키와 접근 권한을 확인해 주세요."
+            : error.status === 429
+              ? "TFT API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."
+              : error.status === 502 || error.status === 504
+                ? "TFT 데이터 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+                : "롤토체스 최근 전적을 불러오는 중 문제가 발생했습니다."
       }
     };
   }
@@ -303,15 +343,12 @@ async function handleTftRequest(searchParams) {
 async function getTftProfile({
   gameName,
   tagLine,
-  receivedPuuid,
-  resolvedAccountPuuid
+  resolvedAccountPuuid,
+  refresh = false
 }) {
   const cacheKey = `${gameName.toLowerCase()}#${tagLine.toLowerCase()}`;
-  const cached = tftResponseCache.get(cacheKey);
-
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
+  const cached = cachedProfile(tftResponseCache, cacheKey, refresh);
+  if (cached) return cached;
 
   let matchIds;
   try {
@@ -357,23 +394,6 @@ async function getTftProfile({
     .filter(Boolean);
   const tftRank = selectTftRank(rankEntries);
   const rankRequestFailed = Boolean(summonerResult.debug || leagueResult.debug);
-  const rankDebug = {
-    tftSummonerStatus: summonerResult.status,
-    tftSummonerIdExists: Boolean(summonerId),
-    tftLeagueStatus: leagueResult.status,
-    tftLeagueLookup: summonerId ? "by-summoner-id" : "by-puuid",
-    tftLeagueEntriesCount: rankEntries.length,
-    tftLeagueQueueTypes: rankEntries.map((entry) => entry.queueType).filter(Boolean),
-    selectedTftRank: tftRank,
-    ...(summonerResult.debug || leagueResult.debug
-      ? {
-        rankError: {
-          ...(summonerResult.debug || leagueResult.debug),
-          tftSummonerIdExists: Boolean(summonerId)
-        }
-      }
-      : {})
-  };
   const payload = {
     tftSummoner: tftSummoner
       ? {
@@ -396,21 +416,12 @@ async function getTftProfile({
       tagLine,
       puuid: resolvedAccountPuuid
     },
-    debug: {
-      step: "complete",
-      receivedPuuid,
-      resolvedAccountPuuid,
-      gameName,
-      tagLine,
-      ...rankDebug
-    },
-    updatedAt: new Date().toISOString()
+    ddragonVersion: await getDdragonVersion(),
+    updatedAt: new Date().toISOString(),
+    refreshAfterSeconds: 30
   };
 
-  tftResponseCache.set(cacheKey, {
-    value: payload,
-    expiresAt: Date.now() + 2 * 60 * 1000
-  });
+  cacheProfile(tftResponseCache, cacheKey, payload);
   return payload;
 }
 
@@ -420,7 +431,7 @@ async function tftRiotFetch(step, host, path, attempt = 0) {
 
   try {
     response = await scheduleRiotRequest(() =>
-      fetch(url, {
+      fetchWithTimeout(url, {
         headers: {
           "X-Riot-Token": TFT_API_KEY
         }
@@ -435,7 +446,7 @@ async function tftRiotFetch(step, host, path, attempt = 0) {
     throw error;
   }
 
-  if (response.status === 429 && attempt < 3) {
+  if (response.status === 429 && attempt < 1 && Number(response.headers.get("retry-after") || 1) <= 2) {
     const retryAfter = Number(response.headers.get("retry-after") || 1);
     await delay(Math.max(1000, retryAfter * 1000));
     return tftRiotFetch(step, host, path, attempt + 1);
@@ -474,7 +485,7 @@ async function tftOptionalFetch(step, host, path) {
       url: error.tftUrl || `https://${host}${path}`,
       riotMessage: error.riotMessage || error.message || "Unknown TFT API error"
     };
-    console.warn(`[${step}] optional TFT request failed`, debug);
+    console.warn(`[${step}] optional TFT request failed`, { status: debug.status });
     return { data: null, status: debug.status, debug };
   }
 }
@@ -727,7 +738,7 @@ async function getTftStaticDataVersion(version) {
   const entries = await Promise.all(
     Object.entries(files).map(async ([type, filename]) => {
       try {
-        const response = await fetch(`${base}/${filename}`);
+        const response = await fetchWithTimeout(`${base}/${filename}`);
         if (!response.ok) return [type, {}];
         const payload = await response.json();
         return [type, createTftAssetMap(payload.data, version)];
@@ -847,6 +858,7 @@ function compactMatch(match) {
       gameCreation: match.info.gameCreation,
       gameStartTimestamp: match.info.gameStartTimestamp,
       gameDuration: match.info.gameDuration,
+      gameVersion: match.info.gameVersion,
       participants: match.info.participants.map((participant) => ({
         puuid: participant.puuid,
         teamId: participant.teamId,
@@ -854,6 +866,9 @@ function compactMatch(match) {
         championId: participant.championId,
         championName: participant.championName,
         champLevel: participant.champLevel,
+        gameEndedInEarlySurrender: Boolean(participant.gameEndedInEarlySurrender),
+        summoner1Id: participant.summoner1Id,
+        summoner2Id: participant.summoner2Id,
         riotIdGameName: participant.riotIdGameName,
         riotIdTagline: participant.riotIdTagline || participant.riotIdTagLine,
         summonerName: participant.summonerName,
@@ -884,12 +899,16 @@ function compactStaticData(staticData, matches, masteries) {
   const championIds = new Set(masteries.map((mastery) => String(mastery.championId)));
   const runeIds = new Set();
   const styleIds = new Set();
+  const itemIds = new Set();
+  const spellIds = new Set();
 
   for (const match of matches) {
     for (const participant of match.info.participants) {
       if (participant.championId) {
         championIds.add(String(participant.championId));
       }
+      for (let slot = 0; slot < 7; slot++) if (participant[`item${slot}`]) itemIds.add(String(participant[`item${slot}`]));
+      for (const id of [participant.summoner1Id, participant.summoner2Id]) if (id) spellIds.add(String(id));
 
       for (const style of participant.perks?.styles || []) {
         styleIds.add(String(style.style));
@@ -902,6 +921,8 @@ function compactStaticData(staticData, matches, masteries) {
   }
 
   return {
+    items: Object.fromEntries([...itemIds].filter((id) => staticData.items?.[id]).map((id) => [id, staticData.items[id]])),
+    spells: Object.fromEntries([...spellIds].filter((id) => staticData.spells?.[id]).map((id) => [id, staticData.spells[id]])),
     champions: Object.fromEntries(
       [...championIds]
         .filter((id) => staticData.champions[id])
@@ -921,7 +942,9 @@ function compactStaticData(staticData, matches, masteries) {
 }
 
 async function getStoredOrFetchMatches(matchIds) {
-  const storedMatches = await getMatchesByIds(matchIds);
+  let storedMatches;
+  try { storedMatches = await getMatchesByIds(matchIds); }
+  catch { storedMatches = new Map(); }
 
   return mapLimit(matchIds, 2, (matchId) =>
     storedMatches.has(matchId)
@@ -1014,26 +1037,13 @@ async function getEntryPuuid(entry) {
 
 async function getChampionStats(position, { force = false } = {}) {
   const version = await getDdragonVersion();
-  const cachedRows = force ? [] : await getChampionStatsFromCache(position, version);
-  const lastMatchUpdatedAt = await getLastUpdatedAt();
-
-  const cacheIsCurrent = cachedRows.length
-    && (!lastMatchUpdatedAt || new Date(cachedRows[0].calculated_at).getTime() >= new Date(lastMatchUpdatedAt).getTime());
-
-  if (cacheIsCurrent) {
-    const staticData = await getStaticDataForStats(version);
-
-    return buildChampionStatsResponse({
-      position,
-      version,
-      rows: cachedRows.map((row) => cacheRowToApiRow(row, staticData)),
-      positionGames: cachedRows.reduce((sum, row) => sum + Number(row.total_games || 0), 0),
-      collectedMatches: await getStoredMatchCount(),
-      updatedAt: cachedRows[0].calculated_at
-    });
-  }
-
-  const participants = await getParticipantsForStats();
+  const cacheKey = `${position}:${version}`;
+  const cached = championStatsCache.get(cacheKey);
+  if (!force && cached?.expiresAt > Date.now()) return cached.value;
+  const since = Date.now() - 28 * 86400_000;
+  // Legacy DB caches had mixed queues/patches; never reuse them for scoped stats.
+  const participants = await getParticipantsForStats({ patchVersion: version, since });
+  const collectedMatches = new Set(participants.map((row) => row.match_id)).size;
 
   if (!participants.length) {
     return buildChampionStatsResponse({
@@ -1041,8 +1051,8 @@ async function getChampionStats(position, { force = false } = {}) {
       version,
       rows: [],
       positionGames: 0,
-      collectedMatches: await getStoredMatchCount(),
-      updatedAt: lastMatchUpdatedAt
+      collectedMatches: 0,
+      updatedAt: new Date().toISOString()
     });
   }
 
@@ -1135,22 +1145,7 @@ async function getChampionStats(position, { force = false } = {}) {
     row.tierGrade = "N/A";
   }
 
-  const eligible = rows
-    .filter((row) => !row.lowSample)
-    .sort((a, b) => b.tierScore - a.tierScore);
-
-  eligible.forEach((row, index) => {
-    const percentile = (index + 1) / eligible.length;
-    row.tierGrade = percentile <= 0.10
-      ? "S"
-      : percentile <= 0.30
-        ? "A"
-        : percentile <= 0.60
-          ? "B"
-          : percentile <= 0.85
-            ? "C"
-            : "D";
-  });
+  assignTierGrades(rows);
 
   rows.sort((a, b) => (
     a.lowSample !== b.lowSample
@@ -1160,32 +1155,16 @@ async function getChampionStats(position, { force = false } = {}) {
 
   const calculatedAt = new Date().toISOString();
 
-  await upsertChampionStatsCache(rows.map((row) => ({
-    position,
-    champion_id: row.championId,
-    champion_name: row.championName,
-    total_games: row.totalGames,
-    wins: row.wins,
-    losses: row.losses,
-    win_rate: row.winRate,
-    pick_rate: row.pickRate,
-    avg_kda: row.averageKDA,
-    avg_cs: row.averageCS,
-    tier_score: row.tierScore,
-    tier_grade: row.tierGrade,
-    low_sample: row.lowSample,
-    patch_version: version,
-    calculated_at: calculatedAt
-  })));
-
-  return buildChampionStatsResponse({
+  const result = buildChampionStatsResponse({
     position,
     version,
     rows,
     positionGames,
-    collectedMatches: await getStoredMatchCount(),
+    collectedMatches,
     updatedAt: calculatedAt
   });
+  championStatsCache.set(cacheKey, { value: result, expiresAt: Date.now() + 300_000 });
+  return result;
 }
 
 function buildChampionStatsResponse({ position, version, rows, positionGames, collectedMatches, updatedAt }) {
@@ -1196,6 +1175,12 @@ function buildChampionStatsResponse({ position, version, rows, positionGames, co
     collectedMatches,
     positionSamples: positionGames,
     minimumSample: 10,
+    minimumEligibleChampions: 10,
+    eligibleChampions: rows.filter((row) => !row.lowSample).length,
+    queueId: 420,
+    windowDays: 28,
+    sampleStart: new Date(Date.now() - 28 * 86400_000).toISOString(),
+    sampleEnd: new Date().toISOString(),
     champions: rows
   };
 }
@@ -1241,12 +1226,12 @@ async function getStaticDataForStats(version) {
 
 async function riotFetch(route, path, attempt = 0) {
   const response = await scheduleRiotRequest(() =>
-    fetch(`https://${route}.api.riotgames.com${path}`, {
+    fetchWithTimeout(`https://${route}.api.riotgames.com${path}`, {
       headers: { "X-Riot-Token": API_KEY }
     })
   );
 
-  if (response.status === 429 && attempt < 3) {
+  if (response.status === 429 && attempt < 1 && Number(response.headers.get("retry-after") || 1) <= 2) {
     const retryAfter = Number(response.headers.get("retry-after") || 1);
     await delay(Math.max(1000, retryAfter * 1000));
     return riotFetch(route, path, attempt + 1);
@@ -1299,7 +1284,7 @@ async function getDdragonVersion() {
   if (Date.now() < ddragonCache.expiresAt) return ddragonCache.version;
 
   try {
-    const response = await fetch("https://ddragon.leagueoflegends.com/api/versions.json");
+    const response = await fetchWithTimeout("https://ddragon.leagueoflegends.com/api/versions.json");
 
     if (response.ok) {
       const versions = await response.json();
@@ -1316,15 +1301,17 @@ async function getDdragonVersion() {
 }
 
 async function getStaticData(version) {
-  if (staticDataCache.value && Date.now() < staticDataCache.expiresAt) {
+  if (staticDataCache.version === version && staticDataCache.value && Date.now() < staticDataCache.expiresAt) {
     return staticDataCache.value;
   }
 
   const base = `https://ddragon.leagueoflegends.com/cdn/${version}/data/ko_KR`;
 
-  const [championResponse, runeResponse] = await Promise.all([
-    fetch(`${base}/champion.json`),
-    fetch(`${base}/runesReforged.json`)
+  const [championResponse, runeResponse, itemResponse, spellResponse] = await Promise.all([
+    fetchWithTimeout(`${base}/champion.json`),
+    fetchWithTimeout(`${base}/runesReforged.json`),
+    fetchWithTimeout(`${base}/item.json`).catch(() => null),
+    fetchWithTimeout(`${base}/summoner.json`).catch(() => null)
   ]);
 
   if (!championResponse.ok || !runeResponse.ok) {
@@ -1337,6 +1324,10 @@ async function getStaticData(version) {
   ]);
 
   const champions = {};
+  const itemPayload = itemResponse?.ok ? await itemResponse.json().catch(() => ({ data: {} })) : { data: {} };
+  const spellPayload = spellResponse?.ok ? await spellResponse.json().catch(() => ({ data: {} })) : { data: {} };
+  const items = Object.fromEntries(Object.entries(itemPayload.data).map(([id, item]) => [id, { name: item.name }]));
+  const spells = Object.fromEntries(Object.values(spellPayload.data).map((spell) => [spell.key, { name: spell.name, image: spell.image.full }]));
   for (const champion of Object.values(championPayload.data)) {
     champions[champion.key] = {
       id: champion.id,
@@ -1364,7 +1355,8 @@ async function getStaticData(version) {
   }
 
   staticDataCache = {
-    value: { champions, runes, runeStyles },
+    version,
+    value: { champions, runes, runeStyles, items, spells },
     expiresAt: Date.now() + 6 * 60 * 60 * 1000
   };
 

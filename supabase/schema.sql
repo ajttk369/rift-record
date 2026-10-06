@@ -67,6 +67,7 @@ create table if not exists public.champion_stats_cache (
 );
 
 create index if not exists participants_match_id_idx on public.participants(match_id);
+create index if not exists matches_stats_scope_idx on public.matches(queue_id, game_version text_pattern_ops, game_creation);
 create index if not exists participants_team_position_idx on public.participants(team_position);
 create index if not exists participants_champion_id_idx on public.participants(champion_id);
 create index if not exists champion_stats_cache_position_idx on public.champion_stats_cache(position);

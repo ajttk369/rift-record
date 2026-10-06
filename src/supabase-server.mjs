@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./security.mjs";
+
 let clientPromise;
 
 export function hasSupabaseConfig() {
@@ -28,7 +30,8 @@ export async function getSupabaseClient() {
           persistSession: false,
           autoRefreshToken: false,
           detectSessionInUrl: false
-        }
+        },
+        global: { fetch: fetchWithTimeout }
       })
     );
   }
